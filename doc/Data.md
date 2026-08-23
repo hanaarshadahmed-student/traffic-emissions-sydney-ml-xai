@@ -14,7 +14,7 @@ rates, and official emission factors (see "Target variable" below).
 | Traffic volume (hourly, by vehicle class) | Transport for NSW, Traffic Volume Viewer | maps.transport.nsw.gov.au/egeomaps/traffic-volumes |
 | Station metadata (LGA, road type, classifier flag) | Transport for NSW, Traffic Volume Viewer | Same as above — "Station Information" download |
 | Weather (max temperature, rainfall, daily) | Bureau of Meteorology, Climate Data Online | reg.bom.gov.au/climate/data |
-| Fuel consumption rates (L/100km by vehicle class) | ABS Survey of Motor Vehicle Use | abs.gov.au |
+| Fuel consumption rates (L/100km by vehicle class, NSW) | ABS Survey of Motor Vehicle Use, 2020 (Table 6) | `data/raw/92080DO001_202006.xls` |
 | Emission factors (kg CO₂-e per litre of fuel) | Australian National Greenhouse Accounts Factors 2025, Table 9 | dcceew.gov.au/climate-change/publications/national-greenhouse-accounts-factors-2025 |
 
 ## Traffic stations used
@@ -57,8 +57,10 @@ co2_estimate (kg) = (volume_light × 0.111 L/km × 2.31 kg CO2-e/L)
                    + (volume_heavy × 0.28  L/km × 2.72 kg CO2-e/L)
 ```
 
-- **0.111 L/km** (11.1 L/100km) — Passenger vehicles, ABS Survey of Motor Vehicle Use, 12 months ended 30 June 2020
-- **0.286 L/km** (28.6 L/100km) — Rigid trucks, ABS Survey of Motor Vehicle Use, 12 months ended 30 June 2020. Chosen over Articulated trucks (53.1 L/100km) since TfNSW's "Heavy Vehicles" classification on arterial roads is dominated by rigid trucks and buses rather than long-haul articulated trucks.
+- **0.114 L/km** (11.4 L/100km) — Passenger vehicles, **New South Wales**, ABS Survey of Motor Vehicle Use, 12 months ended 30 June 2020, Table 6 (`data/raw/92080DO001_202006.xls`)
+- **0.28 L/km** (28 L/100km) — Rigid trucks, **New South Wales**, same source. Chosen over Articulated trucks (51 L/100km in NSW) since TfNSW's "Heavy Vehicles" classification on arterial roads is dominated by rigid trucks and buses rather than long-haul articulated trucks.
+
+State-specific (NSW) rates were used rather than the national average, since this project is Sydney-specific.
 
 **Note:** the ABS Survey of Motor Vehicle Use was discontinued after this release — it is the most recent official Australian source available, but reflects 2020 vehicle fleet efficiency, not 2024–2025. Actual fuel consumption has likely improved slightly since, meaning `co2_estimate` is a small conservative (over-)estimate. Worth one sentence on this in the methodology limitations.
 - **2.31 kg CO2-e/L** — petrol, Scope 1 (tailpipe), NGA Factors 2025 Table 9, cars/light commercial vehicles
