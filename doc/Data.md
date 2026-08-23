@@ -57,8 +57,10 @@ co2_estimate (kg) = (volume_light × 0.111 L/km × 2.31 kg CO2-e/L)
                    + (volume_heavy × 0.28  L/km × 2.72 kg CO2-e/L)
 ```
 
-- **0.111 L/km** (11.1 L/100km) — average light vehicle fuel consumption, ABS Survey of Motor Vehicle Use
-- **0.28 L/km** (28 L/100km) — blended estimate for heavy vehicles (TfNSW's "heavy vehicle" classification includes rigid trucks and buses, not just articulated trucks, so this sits below the ABS articulated-truck figure of 53.1 L/100km)
+- **0.111 L/km** (11.1 L/100km) — Passenger vehicles, ABS Survey of Motor Vehicle Use, 12 months ended 30 June 2020
+- **0.286 L/km** (28.6 L/100km) — Rigid trucks, ABS Survey of Motor Vehicle Use, 12 months ended 30 June 2020. Chosen over Articulated trucks (53.1 L/100km) since TfNSW's "Heavy Vehicles" classification on arterial roads is dominated by rigid trucks and buses rather than long-haul articulated trucks.
+
+**Note:** the ABS Survey of Motor Vehicle Use was discontinued after this release — it is the most recent official Australian source available, but reflects 2020 vehicle fleet efficiency, not 2024–2025. Actual fuel consumption has likely improved slightly since, meaning `co2_estimate` is a small conservative (over-)estimate. Worth one sentence on this in the methodology limitations.
 - **2.31 kg CO2-e/L** — petrol, Scope 1 (tailpipe), NGA Factors 2025 Table 9, cars/light commercial vehicles
 - **2.72 kg CO2-e/L** — diesel, Scope 1 (tailpipe), NGA Factors 2025 Table 9, heavy duty vehicles (Euro IV+)
 

@@ -35,8 +35,8 @@ STATIONS = {
 # --- Emission factors (NGA Factors 2025, Table 9, Scope 1) ---
 PETROL_EF = 2.31   # kg CO2-e per litre
 DIESEL_EF = 2.72   # kg CO2-e per litre
-LIGHT_FUEL_RATE = 11.1 / 100   # L per km (ABS Survey of Motor Vehicle Use)
-HEAVY_FUEL_RATE = 28.0 / 100   # L per km (blended estimate, rigid+articulated)
+LIGHT_FUEL_RATE = 11.1 / 100   # L per km - Passenger vehicles, ABS SMVU 2020 (final release)
+HEAVY_FUEL_RATE = 28.6 / 100   # L per km - Rigid trucks, ABS SMVU 2020 (final release)
 
 
 def load_traffic_station(filename: str, meta: dict) -> pd.DataFrame:
