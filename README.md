@@ -14,16 +14,17 @@ data/
   processed/   Output of the preprocessing pipeline (merged_dataset.csv)
 notebooks/     Exploration, feature engineering, modelling, XAI (in order)
 src/
-  data_preprocessing.py   Builds data/processed/merged_dataset.csv from data/raw/
-  feature_engineering.py  (next step)
-  models.py                (next step)
-  evaluation.py             (next step)
-  explainability.py         (next step)
+  01_data_ingestion.py
+  02_data_preprocessing.py   
+  03_feature_engineering.py  (next step)
+  04_models.py                (next step)
+  05_evaluation.py             (next step)
+  05_explainability.py         (next step)
 results/       Model outputs, figures, SHAP plots
 ```
 
 ## Setup
-
+#For windows
 ```powershell
 python -m venv venv
 .\venv\Scripts\Activate.ps1
