@@ -1,14 +1,15 @@
 """
-data_preprocessing.py
+02_data_preprocessing.py
 
-Cleans the merged dataset produced by ingestion.py (data/processed/merged_dataset.csv):
+Cleans the merged dataset produced by 01_data_ingestion.py
+(data/processed/merged_dataset.csv):
 - Validates dtypes and checks for duplicates
 - Checks for impossible/invalid values (negative volumes, negative CO2, out-of-range weather)
-- Imputes missing weather values (flagging every imputed row so it's traceable)
-- Leaves genuine coverage gaps (missing timestamps) alone — does not fabricate rows
+- Reports genuine hourly coverage gaps per station (does NOT fill these in)
+- Imputes missing weather values only (flagging every imputed row so it's traceable)
 
 Run from project root:
-    python src/data_preprocessing.py
+    python src/02_data_preprocessing.py
 """
 
 import pandas as pd
@@ -26,8 +27,11 @@ RAINFALL_MIN, RAINFALL_MAX = 0, 400
 
 
 def load_and_validate(path: Path) -> pd.DataFrame:
+    print(f"Loading {path}")
     df = pd.read_csv(path)
     df["timestamp"] = pd.to_datetime(df["timestamp"])
+    print(f"Loaded {len(df):,} rows, {df['station_id'].nunique()} stations, "
+          f"{df['timestamp'].min()} to {df['timestamp'].max()}")
 
     n_dupes = df.duplicated().sum()
     if n_dupes:
@@ -64,6 +68,23 @@ def check_invalid_values(df: pd.DataFrame) -> None:
         print("No invalid values found (volumes, CO2, temp, rainfall all in range).")
 
 
+def report_coverage_gaps(df: pd.DataFrame) -> None:
+    """Report genuine missing hourly timestamps per station. These are NOT
+    filled in — fabricating rows here would create fake data a model would
+    learn from as if it were real traffic. This just makes the known gaps
+    (documented in DATA.md) visible and quantified from the actual data,
+    rather than trusted from memory."""
+    print("Hourly coverage gaps per station (documented in DATA.md, not filled here):")
+    for station_id, group in df.groupby("station_id"):
+        road = group["road"].iloc[0]
+        full_range = pd.date_range(group["timestamp"].min(), group["timestamp"].max(), freq="h")
+        actual = set(group["timestamp"])
+        missing = len(full_range) - len(actual)
+        pct_missing = missing / len(full_range) * 100
+        print(f"  {station_id} ({road}): {missing:,} missing hours of {len(full_range):,} "
+              f"({pct_missing:.1f}%)")
+
+
 def impute_weather(df: pd.DataFrame) -> pd.DataFrame:
     """Fill missing weather values per station, in chronological order,
     using forward-fill then backward-fill. Every imputed row is flagged
@@ -84,21 +105,19 @@ def impute_weather(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def main():
-    print(f"Loading {INPUT_FILE}")
     df = load_and_validate(INPUT_FILE)
-    print(f"Loaded {len(df):,} rows\n")
+    print()
 
     print("Checking for invalid values...")
     check_invalid_values(df)
     print()
 
+    report_coverage_gaps(df)
+    print()
+
     print("Imputing missing weather values...")
     df = impute_weather(df)
     print()
-
-    # Note: genuine coverage gaps (missing hourly timestamps entirely) are
-    # left as-is intentionally — see DATA.md for documented gap percentages
-    # per station. These are not filled here.
 
     df.to_csv(OUTPUT_FILE, index=False)
     print(f"Saved {len(df):,} rows to {OUTPUT_FILE}")

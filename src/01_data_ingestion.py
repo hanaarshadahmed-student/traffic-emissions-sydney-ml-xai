@@ -1,35 +1,41 @@
 """
-data_preprocessing.py
+01_data_ingestion.py
 
 Reads raw TfNSW traffic and BOM weather data, builds one merged hourly
 dataset per traffic station, and computes the CO2 target variable.
 
 Run from project root:
-    python src/data_preprocessing.py
+    python src/01_data_ingestion.py
 """
 
 import pandas as pd
 import numpy as np
 from pathlib import Path
 
-RAW_DIR = Path("data/raw")
+TRAFFIC_DIR = Path("data/raw/traffic")
+WEATHER_DIR = Path("data/raw/weather")
 PROCESSED_DIR = Path("data/processed")
 
 # --- Station configuration ---
 # Maps each traffic station file to its road/lga and matching BOM weather station
 STATIONS = {
-    "50240 - Briens Road.csv": {
+    "50240_briens_road_northmead.csv": {
         "station_id": "50240", "road": "Briens Road", "lga": "Parramatta",
         "weather_station": "066124"
     },
-    "50260 - Silverwater Road.csv": {
+    "50260_silverwater_road_rydalmere.csv": {
         "station_id": "50260", "road": "Silverwater Road", "lga": "Parramatta",
         "weather_station": "066124"
     },
-    "7272 - Edgar Street.csv": {
+    "7272_edgar_street_bankstown.csv": {
         "station_id": "7272", "road": "Edgar Street", "lga": "Bankstown",
         "weather_station": "066137"
     },
+}
+
+WEATHER_NAMES = {
+    "066124": "Parramatta North",
+    "066137": "Bankstown Airport",
 }
 
 # --- Emission factors (NGA Factors 2025, Table 9, Scope 1) ---
@@ -42,8 +48,16 @@ HEAVY_FUEL_RATE = 28.0 / 100   # L per km - Rigid trucks, NSW, ABS SMVU 2020 Tab
 def load_traffic_station(filename: str, meta: dict) -> pd.DataFrame:
     """Load one traffic station file, sum both directions, pivot to
     wide light/heavy columns, and return one row per hourly timestamp."""
-    df = pd.read_csv(RAW_DIR / filename)
+    path = TRAFFIC_DIR / filename
+    df = pd.read_csv(path)
     hour_cols = [c for c in df.columns if c.startswith("hour_")]
+
+    date_min, date_max = df["date"].min(), df["date"].max()
+    directions = sorted(df["cardinal_direction_seq"].unique())
+    print(f"  {filename}")
+    print(f"    Road: {meta['road']} ({meta['lga']}) | Station ID: {meta['station_id']}")
+    print(f"    Date range: {date_min} to {date_max} | Directions: {', '.join(directions)}")
+    print(f"    Raw rows: {len(df):,}")
 
     # Only keep Light/Heavy (drop "All Vehicles" - it's redundant)
     df = df[df["classification_seq"].isin(["Light Vehicles", "Heavy Vehicles"])]
@@ -82,14 +96,26 @@ def load_traffic_station(filename: str, meta: dict) -> pd.DataFrame:
     pivoted["road"] = meta["road"]
     pivoted["lga"] = meta["lga"]
     pivoted["weather_station"] = meta["weather_station"]
+
+    # Expected vs actual hourly rows tells us the real coverage gap immediately
+    expected_hours = (pd.to_datetime(date_max) - pd.to_datetime(date_min)).days * 24 + 24
+    actual_hours = pivoted["timestamp"].nunique()
+    pct_covered = actual_hours / expected_hours * 100
+    print(f"    Hourly coverage: {actual_hours:,} / {expected_hours:,} expected hours ({pct_covered:.1f}%)")
+
     return pivoted
 
 
 def load_weather(station_number: str) -> pd.DataFrame:
     """Load and merge max temperature + rainfall for a BOM station across
-    all available years found in data/raw."""
-    temp_files = sorted(RAW_DIR.glob(f"IDCJAC0010_{station_number}_*_Data.csv"))
-    rain_files = sorted(RAW_DIR.glob(f"IDCJAC0009_{station_number}_*_Data.csv"))
+    all available years found in data/raw/weather."""
+    name = WEATHER_NAMES.get(station_number, "Unknown")
+    temp_files = sorted(WEATHER_DIR.glob(f"{station_number}_*_maxtemp_*.csv"))
+    rain_files = sorted(WEATHER_DIR.glob(f"{station_number}_*_rainfall_*.csv"))
+
+    print(f"  {station_number} ({name})")
+    print(f"    Max temp files: {[f.name for f in temp_files]}")
+    print(f"    Rainfall files: {[f.name for f in rain_files]}")
 
     temp_df = pd.concat([pd.read_csv(f) for f in temp_files], ignore_index=True) if temp_files else pd.DataFrame()
     rain_df = pd.concat([pd.read_csv(f) for f in rain_files], ignore_index=True) if rain_files else pd.DataFrame()
@@ -101,16 +127,22 @@ def load_weather(station_number: str) -> pd.DataFrame:
         temp_df["date"] = make_date(temp_df)
         temp_df = temp_df[["date", "Maximum temperature (Degree C)"]].rename(
             columns={"Maximum temperature (Degree C)": "max_temp"})
+        print(f"    Max temp: {len(temp_df):,} days, {temp_df['date'].min().date()} to {temp_df['date'].max().date()}, "
+              f"{temp_df['max_temp'].isna().sum()} missing values")
 
     if not rain_df.empty:
         rain_df["date"] = make_date(rain_df)
         rain_df = rain_df[["date", "Rainfall amount (millimetres)"]].rename(
             columns={"Rainfall amount (millimetres)": "rainfall"})
+        print(f"    Rainfall: {len(rain_df):,} days, {rain_df['date'].min().date()} to {rain_df['date'].max().date()}, "
+              f"{rain_df['rainfall'].isna().sum()} missing values")
 
     if temp_df.empty:
         weather = rain_df
+        print(f"    WARNING: no max temp files found for station {station_number}")
     elif rain_df.empty:
         weather = temp_df
+        print(f"    WARNING: no rainfall files found for station {station_number}")
     else:
         weather = temp_df.merge(rain_df, on="date", how="outer")
 
@@ -138,21 +170,31 @@ def compute_co2(df: pd.DataFrame) -> pd.DataFrame:
 def main():
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
+    print("=" * 60)
+    print("STEP 1: Loading traffic station data")
+    print("=" * 60)
     all_stations = []
     for filename, meta in STATIONS.items():
-        print(f"Loading traffic: {filename}")
         station_df = load_traffic_station(filename, meta)
         all_stations.append(station_df)
+        print()
     traffic = pd.concat(all_stations, ignore_index=True)
     traffic = add_temporal_features(traffic)
+    print(f"Total traffic rows across all stations: {len(traffic):,}\n")
 
+    print("=" * 60)
+    print("STEP 2: Loading weather data")
+    print("=" * 60)
     weather_stations = set(m["weather_station"] for m in STATIONS.values())
     weather_frames = []
     for ws in weather_stations:
-        print(f"Loading weather: {ws}")
         weather_frames.append(load_weather(ws))
+        print()
     weather = pd.concat(weather_frames, ignore_index=True)
 
+    print("=" * 60)
+    print("STEP 3: Merging traffic + weather, computing CO2 target")
+    print("=" * 60)
     merged = traffic.merge(weather, on=["date", "weather_station"], how="left")
     merged = compute_co2(merged)
 
@@ -168,11 +210,21 @@ def main():
 
     out_path = PROCESSED_DIR / "merged_dataset.csv"
     merged.to_csv(out_path, index=False)
-    print(f"\nSaved {len(merged):,} rows to {out_path}")
-    print(f"Missing rainfall rows: {merged['rainfall'].isna().sum():,}")
-    print(f"Missing max_temp rows: {merged['max_temp'].isna().sum():,}")
+
+    print(f"Saved {len(merged):,} rows to {out_path}\n")
+
+    print("=" * 60)
+    print("SUMMARY")
+    print("=" * 60)
+    print(f"Date range: {merged['timestamp'].min()} to {merged['timestamp'].max()}")
+    print(f"Missing rainfall rows: {merged['rainfall'].isna().sum():,} "
+          f"({merged['rainfall'].isna().mean()*100:.2f}%)")
+    print(f"Missing max_temp rows: {merged['max_temp'].isna().sum():,} "
+          f"({merged['max_temp'].isna().mean()*100:.2f}%)")
     print(f"\nPer-station row counts:")
-    print(merged.groupby("station_id").size())
+    print(merged.groupby(["station_id", "road"]).size())
+    print(f"\nCO2 estimate summary (kg):")
+    print(merged["co2_estimate"].describe().round(1))
 
 
 if __name__ == "__main__":
