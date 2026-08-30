@@ -1,1 +1,10 @@
 venv/
+
+# Large source datasets used by the supplementary analysis remain local.
+Dataset/
+
+# Local duplicate of the tracked, professionally named ABS workbook.
+data/raw/92080DO001_202006.xls
+
+# macOS metadata files.
+.DS_Store
