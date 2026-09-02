@@ -1,128 +1,129 @@
 """
-02_data_preprocessing.py
+CO2/NO2 Traffic-Emissions Capstone — Preprocessing Script
+============================================================
+Takes both raw combined datasets from 01_data_ingestion.py and makes the
+deliberate cleaning decisions needed before feature engineering / EDA.
+Runs the same cleaning logic on both resolutions.
 
-Cleans the merged dataset produced by 01_data_ingestion.py
-(data/processed/merged_dataset.csv):
-- Validates dtypes and checks for duplicates
-- Checks for impossible/invalid values (negative volumes, negative CO2, out-of-range weather)
-- Reports genuine hourly coverage gaps per station (does NOT fill these in)
-- Imputes missing weather values only (flagging every imputed row so it's traceable)
+Every decision here is logged and printed so it can be explained/cited
+in the report -- nothing is silently dropped.
 
-Run from project root:
-    python src/02_data_preprocessing.py
+Inputs:  data/processed/final_combined_dataset_daily.csv
+         data/processed/final_combined_dataset_hourly.csv
+Outputs: data/processed/preprocessed_daily.csv     (modeling-ready, all stations)
+         data/processed/preprocessed_hourly.csv    (modeling-ready, metro-only stations)
+         data/processed/excluded_stations_log_daily.csv
+         data/processed/excluded_stations_log_hourly.csv
 """
 
 import pandas as pd
-import numpy as np
-from pathlib import Path
+import os
 
-PROCESSED_DIR = Path("data/processed")
-INPUT_FILE = PROCESSED_DIR / "merged_dataset.csv"
-OUTPUT_FILE = PROCESSED_DIR / "cleaned_dataset.csv"
+OUT_DIR = "data/processed"
 
-# Plausible ranges for Sydney weather — anything outside this signals a real
-# data problem worth investigating, not a normal reading.
-TEMP_MIN, TEMP_MAX = -5, 50
-RAINFALL_MIN, RAINFALL_MAX = 0, 400
+# Stations with fewer days of traffic data than this are flagged (not dropped)
+# as thin-coverage -- a judgement call, adjust and justify in your report.
+MIN_TRAFFIC_DAYS = 90
 
 
-def load_and_validate(path: Path) -> pd.DataFrame:
-    print(f"Loading {path}")
-    df = pd.read_csv(path)
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
-    print(f"Loaded {len(df):,} rows, {df['station_id'].nunique()} stations, "
-          f"{df['timestamp'].min()} to {df['timestamp'].max()}")
+def log(msg):
+    print(msg)
 
-    n_dupes = df.duplicated().sum()
-    if n_dupes:
-        print(f"WARNING: {n_dupes} exact duplicate rows found — dropping.")
-        df = df.drop_duplicates()
+
+def preprocess(df, label, min_days_col_scale=1):
+    """Shared cleaning logic. min_days_col_scale=24 for hourly data, since
+    'days of coverage' there means station-hours / 24."""
+    excluded_records = []
+    log(f"\n{'='*60}\nPreprocessing [{label}]\n{'='*60}")
+    log(f"Loaded {len(df)} rows across {df['station_id'].nunique()} stations")
+
+    # ---- Step 1: drop stations with zero NO2 coverage ----
+    no_coverage = df.loc[~df["has_no2_coverage"], "station_id"].unique()
+    for sid in no_coverage:
+        n = len(df[df["station_id"] == sid])
+        aq_site = df.loc[df["station_id"] == sid, "matched_aq_site"].iloc[0]
+        excluded_records.append({
+            "station_id": sid, "reason": "no NO2 coverage at matched AQ site",
+            "matched_aq_site": aq_site, "rows_dropped": n,
+        })
+    before = len(df)
+    df = df[df["has_no2_coverage"]].copy()
+    log(f"Step 1 -- dropped {len(no_coverage)} stations with no NO2 coverage "
+        f"({no_coverage.tolist()}): {before - len(df)} rows removed, {len(df)} remain")
+
+    # ---- Step 2: sanity-check traffic volume ----
+    bad_traffic = df["traffic_volume_total"] < 0
+    if bad_traffic.any():
+        log(f"Step 2 -- WARNING: {bad_traffic.sum()} rows have negative traffic_volume_total, dropping them")
+        df = df[~bad_traffic].copy()
     else:
-        print("No duplicate rows found.")
+        log("Step 2 -- no negative traffic volumes found, nothing to drop")
 
-    return df
-
-
-def check_invalid_values(df: pd.DataFrame) -> None:
-    """Report (don't silently fix) impossible values — these indicate a
-    bug upstream, not something to patch here."""
-    issues = []
-    for col in ["volume_light", "volume_heavy", "co2_estimate"]:
-        n_negative = (df[col] < 0).sum()
-        if n_negative:
-            issues.append(f"{n_negative} negative values in {col}")
-
-    n_temp_bad = (~df["max_temp"].between(TEMP_MIN, TEMP_MAX) & df["max_temp"].notna()).sum()
-    if n_temp_bad:
-        issues.append(f"{n_temp_bad} max_temp values outside plausible range ({TEMP_MIN}-{TEMP_MAX}C)")
-
-    n_rain_bad = (~df["rainfall"].between(RAINFALL_MIN, RAINFALL_MAX) & df["rainfall"].notna()).sum()
-    if n_rain_bad:
-        issues.append(f"{n_rain_bad} rainfall values outside plausible range ({RAINFALL_MIN}-{RAINFALL_MAX}mm)")
-
-    if issues:
-        print("INVALID VALUES FOUND — investigate before proceeding:")
-        for issue in issues:
-            print(f"  - {issue}")
+    # ---- Step 3: sanity-check temperature ----
+    bad_temp = df["temp_c"].notna() & ((df["temp_c"] < -10) | (df["temp_c"] > 50))
+    if bad_temp.any():
+        log(f"Step 3 -- WARNING: {bad_temp.sum()} rows have temp_c outside [-10, 50]C, setting to NaN")
+        df.loc[bad_temp, "temp_c"] = pd.NA
     else:
-        print("No invalid values found (volumes, CO2, temp, rainfall all in range).")
+        log("Step 3 -- no out-of-range temperatures found")
+
+    # ---- Step 4: drop rows with missing NO2 (the target) ----
+    before = len(df)
+    missing_no2_by_station = (
+        df[df["no2_pphm"].isna()].groupby("station_id").size().rename("rows_dropped_missing_no2")
+    )
+    df_clean = df.dropna(subset=["no2_pphm"]).copy()
+    log(f"Step 4 -- dropped {before - len(df_clean)} rows with missing NO2 target: {len(df_clean)} rows remain")
+    if len(missing_no2_by_station):
+        log("           breakdown by station:")
+        for sid, n in missing_no2_by_station.items():
+            log(f"             {sid}: {n} rows")
+
+    # ---- Step 5: flag (not drop) stations with thin coverage ----
+    unit_counts = df_clean.groupby("station_id").size() / min_days_col_scale
+    thin = unit_counts[unit_counts < MIN_TRAFFIC_DAYS]
+    if len(thin):
+        log(f"Step 5 -- NOTE: {len(thin)} station(s) have under {MIN_TRAFFIC_DAYS} equivalent days of data "
+            f"after cleaning ({dict(thin.round(1))}). Kept but flagged.")
+    else:
+        log(f"Step 5 -- all remaining stations have at least {MIN_TRAFFIC_DAYS} equivalent days of data")
+
+    # ---- Step 6: drop exact duplicate rows ----
+    dedup_cols = ["station_id", "date"] + (["hour_ending"] if "hour_ending" in df_clean.columns else [])
+    dup_mask = df_clean.duplicated(subset=dedup_cols, keep="first")
+    if dup_mask.any():
+        log(f"Step 6 -- dropping {dup_mask.sum()} duplicate {dedup_cols} rows")
+        df_clean = df_clean[~dup_mask].copy()
+    else:
+        log(f"Step 6 -- no duplicate {dedup_cols} rows found")
+
+    log(f"\nFinal [{label}] station list:")
+    for sid in sorted(df_clean["station_id"].unique()):
+        n = len(df_clean[df_clean["station_id"] == sid])
+        log(f"  {sid}: {n} rows")
+
+    return df_clean, pd.DataFrame(excluded_records)
 
 
-def report_coverage_gaps(df: pd.DataFrame) -> None:
-    """Report genuine missing hourly timestamps per station. These are NOT
-    filled in — fabricating rows here would create fake data a model would
-    learn from as if it were real traffic. This just makes the known gaps
-    (documented in DATA.md) visible and quantified from the actual data,
-    rather than trusted from memory."""
-    print("Hourly coverage gaps per station (documented in DATA.md, not filled here):")
-    for station_id, group in df.groupby("station_id"):
-        road = group["road"].iloc[0]
-        full_range = pd.date_range(group["timestamp"].min(), group["timestamp"].max(), freq="h")
-        actual = set(group["timestamp"])
-        missing = len(full_range) - len(actual)
-        pct_missing = missing / len(full_range) * 100
-        print(f"  {station_id} ({road}): {missing:,} missing hours of {len(full_range):,} "
-              f"({pct_missing:.1f}%)")
+def run():
+    os.makedirs(OUT_DIR, exist_ok=True)
 
+    daily_raw = pd.read_csv(os.path.join(OUT_DIR, "final_combined_dataset_daily.csv"),
+                             parse_dates=["date"], dtype={"station_id": str}, low_memory=False)
+    daily_clean, daily_excluded = preprocess(daily_raw, "DAILY", min_days_col_scale=1)
+    daily_clean.to_csv(os.path.join(OUT_DIR, "preprocessed_daily.csv"), index=False)
+    daily_excluded.to_csv(os.path.join(OUT_DIR, "excluded_stations_log_daily.csv"), index=False)
+    log(f"\nSaved -> {OUT_DIR}/preprocessed_daily.csv ({len(daily_clean)} rows)")
 
-def impute_weather(df: pd.DataFrame) -> pd.DataFrame:
-    """Fill missing weather values per station, in chronological order,
-    using forward-fill then backward-fill. Every imputed row is flagged
-    so it stays traceable rather than silently blended into real readings."""
-    df = df.sort_values(["station_id", "timestamp"]).reset_index(drop=True)
+    hourly_raw = pd.read_csv(os.path.join(OUT_DIR, "final_combined_dataset_hourly.csv"),
+                              parse_dates=["date"], dtype={"station_id": str}, low_memory=False)
+    hourly_clean, hourly_excluded = preprocess(hourly_raw, "HOURLY", min_days_col_scale=24)
+    hourly_clean.to_csv(os.path.join(OUT_DIR, "preprocessed_hourly.csv"), index=False)
+    hourly_excluded.to_csv(os.path.join(OUT_DIR, "excluded_stations_log_hourly.csv"), index=False)
+    log(f"\nSaved -> {OUT_DIR}/preprocessed_hourly.csv ({len(hourly_clean)} rows)")
 
-    df["max_temp_imputed"] = df["max_temp"].isna()
-    df["rainfall_imputed"] = df["rainfall"].isna()
-
-    for col in ["max_temp", "rainfall"]:
-        n_missing_before = df[col].isna().sum()
-        df[col] = df.groupby("station_id")[col].transform(lambda s: s.ffill().bfill())
-        n_missing_after = df[col].isna().sum()
-        print(f"{col}: {n_missing_before} missing -> {n_missing_after} missing after impute "
-              f"({n_missing_before - n_missing_after} filled)")
-
-    return df
-
-
-def main():
-    df = load_and_validate(INPUT_FILE)
-    print()
-
-    print("Checking for invalid values...")
-    check_invalid_values(df)
-    print()
-
-    report_coverage_gaps(df)
-    print()
-
-    print("Imputing missing weather values...")
-    df = impute_weather(df)
-    print()
-
-    df.to_csv(OUTPUT_FILE, index=False)
-    print(f"Saved {len(df):,} rows to {OUTPUT_FILE}")
-    print(f"Imputed rows: {df['max_temp_imputed'].sum()} max_temp, {df['rainfall_imputed'].sum()} rainfall")
+    return daily_clean, hourly_clean
 
 
 if __name__ == "__main__":
-    main()
+    run()
