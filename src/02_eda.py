@@ -1,5 +1,5 @@
 """
-CO2/NO2 Traffic-Emissions Capstone — Preprocessing Script
+CO2/NO2 Traffic-Emissions Capstone — Combing all our data for eda
 ============================================================
 Takes both raw combined datasets from 01_data_ingestion.py and makes the
 deliberate cleaning decisions needed before feature engineering / EDA.

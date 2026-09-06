@@ -18,32 +18,50 @@ Fixes applied vs. the earlier version:
     New Year's Day). It's rebuilt here from a real NSW public holiday
     calendar (the `holidays` package) instead of trusting the raw column.
 
+Station-metadata enrichment added:
+  - `matched_aq_site`/`aq_distance_km` are cross-checked (not overwritten)
+    against the NSW AQ site registry via haversine distance -- see
+    `verify_aq_site_matches()`. Any station whose hardcoded match isn't
+    the true nearest geocoded site is flagged for manual review (usually
+    because the nearest site doesn't measure NO2, which this registry
+    doesn't tell us -- so it's a flag, not an auto-correction).
+  - `posted_speed_kmh`/`speed_zone_type` are pulled from the TfNSW speed
+    zones shapefile via nearest-line matching -- see `match_speed_zones()`.
+    Both are optional: if the AQ site registry or the speed zones
+    shapefile aren't present locally, ingestion still runs, just without
+    those extra columns (a warning is printed either way).
+
 Design principle unchanged: nothing is filtered/dropped here except the
 above structural exclusion for the hourly build. Station-level modeling
 decisions (dropping no-NO2-coverage stations, thin-coverage stations,
 missing target rows) still happen in 02_data_preprocessing.py, not here.
 
-Requires: pandas, python-calamine, holidays
-    pip install python-calamine holidays
+Requires: pandas, python-calamine, holidays, pyshp
+    pip install pandas python-calamine holidays pyshp
 
 Expected folder layout (relative to project root):
     data/raw/traffic/<station name>.csv
     data/raw/weather/tmp_table_*_<site>.xls        - metro AQ-site weather
     data/raw/weather/IDCJAC00{09,10,11}_..._<site>_Data.csv - BOM rural daily weather
     data/raw/emissions/tmp_table_*_<site>.xls       - metro AQ-site pollutant data
+    data/raw/air_quality/nsw_air_quality_sites.json - optional, enables AQ-site verification
+    data/raw/speed_zones/Speed_Zones.{shp,shx,dbf,prj} - optional, enables posted-speed matching
 """
 
 import pandas as pd
-import glob, os
+import glob, os, json, math
 import holidays as holidays_lib
 
 TRAFFIC_DIR = "data/raw/traffic"
 BOM_DIR = "data/raw/weather"
 METRO_WEATHER_DIR = "data/raw/weather"
 METRO_EMISSIONS_DIR = "data/raw/emissions"
+AQ_SITES_PATH = "data/raw/air_quality/nsw_air_quality_sites.json"
+SPEED_ZONES_SHP = "data/raw/speed_zones/Speed_Zones.shp"
 OUT_DIR = "data/processed"
 DAILY_OUT_PATH = os.path.join(OUT_DIR, "final_combined_dataset_daily.csv")
 HOURLY_OUT_PATH = os.path.join(OUT_DIR, "final_combined_dataset_hourly.csv")
+AQ_VERIFICATION_OUT_PATH = os.path.join(OUT_DIR, "aq_site_verification.csv")
 
 NSW_HOLIDAYS = holidays_lib.Australia(subdiv="NSW", years=range(2023, 2027))
 
@@ -88,6 +106,154 @@ def read_metro_xls(path):
 
 def real_public_holiday(dates):
     return pd.Series(dates).dt.date.isin(NSW_HOLIDAYS).astype(int).values
+
+
+# ---------------------------------------------------------------------------
+# STATION METADATA ENRICHMENT -- AQ-site verification (flag only, no overwrite)
+# ---------------------------------------------------------------------------
+
+def _haversine_km(lat1, lon1, lat2, lon2):
+    R = 6371.0088
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlmb = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlmb / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(a))
+
+
+def verify_aq_site_matches(stations, sites_path=AQ_SITES_PATH):
+    """Cross-check each station's hardcoded aq_site/aq_distance_km against
+    the true nearest geocoded AQ site (haversine). Does NOT correct
+    STATIONS -- NO2 availability per site isn't in this registry, so the
+    hardcoded (farther) site may still be the deliberate, correct choice.
+    Returns None if the registry file isn't present (feature is optional)."""
+    if not os.path.exists(sites_path):
+        print(f"  [AQ verification] SKIPPED -- '{sites_path}' not found.")
+        return None
+
+    with open(sites_path) as f:
+        sites = json.load(f)
+    sites = [s for s in sites if s.get("Latitude") is not None and s.get("Longitude") is not None]
+
+    rows = []
+    for name, cfg in stations.items():
+        nearest_name, nearest_km = min(
+            ((s["SiteName"], _haversine_km(cfg["lat"], cfg["lon"], s["Latitude"], s["Longitude"]))
+             for s in sites),
+            key=lambda x: x[1],
+        )
+        rows.append({
+            "station": name,
+            "hardcoded_site": cfg["aq_site"],
+            "hardcoded_km": cfg["aq_distance_km"],
+            "computed_nearest_site": nearest_name,
+            "computed_nearest_km": round(nearest_km, 1),
+            "flag": "REVIEW" if nearest_name.upper() not in cfg["aq_site"].upper() else "OK",
+        })
+    df = pd.DataFrame(rows)
+
+    n_review = (df["flag"] == "REVIEW").sum()
+    print(f"  [AQ verification] {len(df) - n_review}/{len(df)} stations match their true nearest AQ site; "
+          f"{n_review} flagged for manual review (see {AQ_VERIFICATION_OUT_PATH}).")
+    if n_review:
+        print(df.loc[df["flag"] == "REVIEW", ["station", "hardcoded_site", "computed_nearest_site", "computed_nearest_km"]]
+              .to_string(index=False))
+
+    os.makedirs(OUT_DIR, exist_ok=True)
+    df.to_csv(AQ_VERIFICATION_OUT_PATH, index=False)
+    return df
+
+
+# ---------------------------------------------------------------------------
+# STATION METADATA ENRICHMENT -- posted speed limit (speed zones shapefile)
+# ---------------------------------------------------------------------------
+
+_EARTH_R = 6378137.0  # matches Speed_Zones.prj (WGS_1984_Web_Mercator_Auxiliary_Sphere)
+
+
+def _lonlat_to_webmercator(lon, lat):
+    x = _EARTH_R * math.radians(lon)
+    y = _EARTH_R * math.log(math.tan(math.pi / 4 + math.radians(lat) / 2))
+    return x, y
+
+
+def _point_seg_dist(px, py, ax, ay, bx, by):
+    dx, dy = bx - ax, by - ay
+    if dx == 0 and dy == 0:
+        return math.hypot(px - ax, py - ay)
+    t = max(0, min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)))
+    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+
+
+def match_speed_zones(stations, shp_path=SPEED_ZONES_SHP, search_radius_m=500):
+    """One pass through the (447k-record) shapefile, checked against every
+    station's bbox at once -- looping stations on the outside would rescan
+    the full file per station instead. Returns {} if the shapefile isn't
+    present locally (feature is optional)."""
+    if not os.path.exists(shp_path):
+        print(f"  [Speed zones] SKIPPED -- '{shp_path}' not found.")
+        return {}
+
+    import shapefile  # pyshp -- only needed for this optional enrichment step
+
+    stations_xy = {name: _lonlat_to_webmercator(cfg["lon"], cfg["lat"]) for name, cfg in stations.items()}
+    best = {name: None for name in stations}
+
+    sf = shapefile.Reader(shp_path)
+    for shape, rec in zip(sf.iterShapes(), sf.iterRecords()):
+        if not shape.points:
+            continue
+        bx0, by0, bx1, by1 = shape.bbox
+        for name, (sx, sy) in stations_xy.items():
+            if bx1 < sx - search_radius_m or bx0 > sx + search_radius_m \
+               or by1 < sy - search_radius_m or by0 > sy + search_radius_m:
+                continue
+            pts = shape.points
+            for i in range(len(pts) - 1):
+                d = _point_seg_dist(sx, sy, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1])
+                if best[name] is None or d < best[name][0]:
+                    best[name] = (d, rec["Speed"], rec["Type"])
+
+    unmatched = [name for name, r in best.items() if r is None]
+    if unmatched:
+        print(f"  [Speed zones] WARNING -- no segment found within {search_radius_m}m for: {unmatched} "
+              f"(try increasing search_radius_m)")
+    matched = len(stations) - len(unmatched)
+    print(f"  [Speed zones] matched {matched}/{len(stations)} stations to a posted speed zone.")
+
+    return {
+        name: {
+            "posted_speed_kmh": int(r[1].split()[0]) if r else None,
+            "speed_zone_type": r[2] if r else None,
+            "speed_zone_match_dist_m": round(r[0], 1) if r else None,
+        }
+        for name, r in best.items()
+    }
+
+
+def _attach_station_metadata(merged, station_id, station_file, cfg, aq_verification, speed_zone_info):
+    """Shared metadata-attach step used by both build_daily() and
+    build_hourly() -- static per-station attributes, not per-row logic."""
+    merged["station_id"] = station_id
+    merged["station_name"] = station_file
+    merged["station_lat"] = cfg["lat"]
+    merged["station_lon"] = cfg["lon"]
+    merged["station_suburb"] = cfg["suburb"]
+    merged["station_lga"] = cfg["lga"]
+    merged["matched_aq_site"] = cfg["aq_site"]
+    merged["aq_distance_km"] = cfg["aq_distance_km"]
+
+    if aq_verification is not None:
+        review_row = aq_verification.loc[aq_verification["station"] == station_file]
+        merged["aq_match_flag"] = review_row["flag"].iloc[0] if len(review_row) else "UNKNOWN"
+
+    sz = speed_zone_info.get(station_file) if speed_zone_info else None
+    if sz:
+        merged["posted_speed_kmh"] = sz["posted_speed_kmh"]
+        merged["speed_zone_type"] = sz["speed_zone_type"]
+        merged["speed_zone_match_dist_m"] = sz["speed_zone_match_dist_m"]
+
+    return merged
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +346,7 @@ def load_metro_emissions_daily(path):
     return daily
 
 
-def build_daily():
+def build_daily(aq_verification=None, speed_zone_info=None):
     all_rows = []
     for station_file, cfg in STATIONS.items():
         station_id = station_file.split(" - ")[0]
@@ -203,14 +369,7 @@ def build_daily():
             merged["co_ppm"] = pd.NA
             merged["ozone_pphm"] = pd.NA
 
-        merged["station_id"] = station_id
-        merged["station_name"] = station_file
-        merged["station_lat"] = cfg["lat"]
-        merged["station_lon"] = cfg["lon"]
-        merged["station_suburb"] = cfg["suburb"]
-        merged["station_lga"] = cfg["lga"]
-        merged["matched_aq_site"] = cfg["aq_site"]
-        merged["aq_distance_km"] = cfg["aq_distance_km"]
+        merged = _attach_station_metadata(merged, station_id, station_file, cfg, aq_verification, speed_zone_info)
         merged["has_no2_coverage"] = merged["no2_pphm"].notna().any()
 
         all_rows.append(merged)
@@ -224,7 +383,9 @@ def build_daily():
         "temp_c", "temp_max_c", "temp_min_c", "humidity_pct", "wind_speed_ms", "wind_dir_deg", "rain_mm",
         "weather_source_type",
         "no2_pphm", "co_ppm", "ozone_pphm",
-        "matched_aq_site", "aq_distance_km", "has_no2_coverage",
+        "matched_aq_site", "aq_distance_km", "aq_match_flag",
+        "posted_speed_kmh", "speed_zone_type", "speed_zone_match_dist_m",
+        "has_no2_coverage",
     ]
     col_order = [c for c in col_order if c in final.columns] + [c for c in final.columns if c not in col_order]
     final = final[col_order]
@@ -305,7 +466,7 @@ def load_metro_emissions_hourly(path):
     return df[["date", "hour_ending", "no2_pphm", "co_ppm", "ozone_pphm"]]
 
 
-def build_hourly():
+def build_hourly(aq_verification=None, speed_zone_info=None):
     hourly_capable = {
         name: cfg for name, cfg in STATIONS.items()
         if cfg["weather"][0] == "metro" and cfg["emissions"] is not None and cfg["emissions"][0] == "metro"
@@ -329,14 +490,7 @@ def build_hourly():
         merged = traffic.merge(weather, on=["date", "hour_ending"], how="left")
         merged = merged.merge(emissions, on=["date", "hour_ending"], how="left")
 
-        merged["station_id"] = station_id
-        merged["station_name"] = station_file
-        merged["station_lat"] = cfg["lat"]
-        merged["station_lon"] = cfg["lon"]
-        merged["station_suburb"] = cfg["suburb"]
-        merged["station_lga"] = cfg["lga"]
-        merged["matched_aq_site"] = cfg["aq_site"]
-        merged["aq_distance_km"] = cfg["aq_distance_km"]
+        merged = _attach_station_metadata(merged, station_id, station_file, cfg, aq_verification, speed_zone_info)
         merged["has_no2_coverage"] = merged["no2_pphm"].notna().any()
 
         all_rows.append(merged)
@@ -349,7 +503,9 @@ def build_hourly():
         "public_holiday", "school_holiday",
         "temp_c", "humidity_pct", "wind_speed_ms", "wind_dir_deg", "rain_mm",
         "no2_pphm", "co_ppm", "ozone_pphm",
-        "matched_aq_site", "aq_distance_km", "has_no2_coverage",
+        "matched_aq_site", "aq_distance_km", "aq_match_flag",
+        "posted_speed_kmh", "speed_zone_type", "speed_zone_match_dist_m",
+        "has_no2_coverage",
     ]
     col_order = [c for c in col_order if c in final.columns] + [c for c in final.columns if c not in col_order]
     final = final[col_order]
@@ -360,7 +516,11 @@ def build_hourly():
 
 
 if __name__ == "__main__":
-    print("=== Building DAILY dataset (all 15 candidate stations) ===")
-    build_daily()
+    print("=== Verifying station metadata (AQ site + speed zone matching) ===")
+    aq_verification = verify_aq_site_matches(STATIONS)
+    speed_zone_info = match_speed_zones(STATIONS)
+
+    print("\n=== Building DAILY dataset (all 15 candidate stations) ===")
+    build_daily(aq_verification, speed_zone_info)
     print("\n=== Building HOURLY dataset (metro-only stations) ===")
-    build_hourly()
+    build_hourly(aq_verification, speed_zone_info)
