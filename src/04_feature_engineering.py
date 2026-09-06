@@ -1,21 +1,8 @@
 """
-CO2/NO2 Traffic-Emissions Capstone — Feature Engineering + Data Prep Script
-=============================================================================
-Two stages, run back to back:
+CO2/NO2 Traffic-Emissions Capstone — Feature Engineering Script
 
-STAGE 1 — FEATURE ENGINEERING: derive new columns from the clean preprocessed
-data. Every feature added or column dropped here traces back to a specific
-EDA finding -- see the comment above each block.
-
-STAGE 2 — DATA PREP: encode categoricals and resolve every remaining missing
-value, so the output file has zero NaNs and is genuinely ready to hand to a
-model. This is the tail end of feature engineering, not a separate cleaning
-pass -- it only exists because of decisions made in Stage 1 (e.g. lag
-features create NaNs on each station's first day) or because a raw gap
-(EDA Part 0.1) needs a modeling decision, not just a data-quality fix.
-
-Input:  data/processed/preprocessed_daily.csv
-        data/processed/preprocessed_hourly.csv
+Input:  data/processed/final_daily.csv
+        data/processed/final_hourly.csv
 Output: data/processed/features_daily.csv    (zero NaNs, model-ready)
         data/processed/features_hourly.csv   (zero NaNs, model-ready)
 """
@@ -134,50 +121,9 @@ def add_hourly_cyclical_features(df):
 
 
 # ---------------------------------------------------------------------------
-# STAGE 2 -- DATA PREP (encoding + imputation, so the output has zero NaNs)
+# LAG-FEATURE CLEANUP (the only cleanup that has to live here, not in 03 --
+# both steps below depend on columns created earlier in THIS script)
 # ---------------------------------------------------------------------------
-
-def drop_redundant_weather_columns(df):
-    """temp_max_c/temp_min_c only exist for BOM-sourced stations and were
-    already averaged into temp_c during ingestion -- keeping all three would
-    just be duplicating information temp_c already carries. Dropped, not
-    imputed, since the information isn't missing, it's redundant."""
-    return df.drop(columns=[c for c in ("temp_max_c", "temp_min_c") if c in df.columns])
-
-
-def drop_unused_secondary_pollutants(df):
-    """co_ppm and ozone_pphm are secondary pollutants, not the project's
-    target (no2_pphm) and not used as a predictor -- dropped rather than
-    imputed, since there's no modeling reason to keep them, and co_ppm alone
-    is ~25% missing."""
-    return df.drop(columns=[c for c in ("co_ppm", "ozone_pphm") if c in df.columns])
-
-
-def impute_wind(df):
-    """wind_speed_ms/wind_dir_deg are structurally absent for BOM (rural)
-    stations -- EDA Part 0.1. Imputing with a single global value would
-    misleadingly imply "average wind" for stations that never measured wind
-    at all, so a has_wind_data flag is added first to preserve that
-    distinction for any model or analysis that wants to use it. The actual
-    NaNs are then filled with the median of the stations that DO have wind
-    data, purely so the column contains no NaNs -- treat has_wind_data as
-    the signal, wind_speed_ms/wind_dir_deg as a best-effort fallback value
-    for stations without real readings."""
-    df["has_wind_data"] = df["wind_speed_ms"].notna().astype(int)
-    for col in ("wind_speed_ms", "wind_dir_deg"):
-        if col in df.columns:
-            df[col] = df[col].fillna(df[col].median())
-    return df
-
-
-def impute_remaining_small_gaps(df):
-    """temp_c and rain_mm are only ~0.3% missing (EDA 0.1) -- small, close to
-    random sensor gaps, not a structural pattern. Filled with the median."""
-    for col in ("temp_c", "rain_mm"):
-        if col in df.columns:
-            df[col] = df[col].fillna(df[col].median())
-    return df
-
 
 def drop_lag_warmup_rows(df, group_col="station_id"):
     """The lag features (Stage 1) are undefined on each station's very first
@@ -193,15 +139,6 @@ def drop_lag_warmup_rows(df, group_col="station_id"):
     return df
 
 
-def one_hot_encode_station(df):
-    """station_id is kept as-is (for grouping/reference in later notebooks)
-    AND one-hot encoded (prefix stn_) for models that need purely numeric
-    input. EDA found real station-level differences (traffic scale, NO2
-    baseline, AQ-distance quality) that a model can't otherwise use."""
-    dummies = pd.get_dummies(df["station_id"], prefix="stn", dtype=int)
-    return pd.concat([df, dummies], axis=1)
-
-
 def assert_no_nans_in_features(df, exclude_cols):
     """Final check: everything except identifier/metadata columns should now
     be NaN-free."""
@@ -214,21 +151,21 @@ def assert_no_nans_in_features(df, exclude_cols):
         print("  confirmed: zero NaNs in all feature columns")
 
 
+# station_lat/lon, suburb/lga, weather_source_type, matched_aq_site, aq_match_flag,
+# aq_quality_weight, speed_zone_type, speed_zone_match_dist_m are metadata/provenance
+# columns, not predictive features -- posted_speed_kmh and aq_distance_km ARE kept as
+# real numeric features (see 03_data_preprocessing.py docstring points 2-3).
 NON_FEATURE_COLS = [
     "date", "station_id", "station_name", "station_lat", "station_lon",
     "station_suburb", "station_lga", "weather_source_type", "matched_aq_site",
+    "aq_match_flag", "aq_quality_weight", "speed_zone_type", "speed_zone_match_dist_m",
     "has_no2_coverage",
 ]
 
 
-def data_prep(df):
-    print("Stage 2 -- data prep (encoding + imputation):")
-    df = drop_redundant_weather_columns(df)
-    df = drop_unused_secondary_pollutants(df)
-    df = impute_wind(df)
-    df = impute_remaining_small_gaps(df)
+def finish_lag_cleanup(df):
+    print("Post-feature-creation cleanup (only what Stage 1 itself introduced):")
     df = drop_lag_warmup_rows(df)
-    df = one_hot_encode_station(df)
     assert_no_nans_in_features(df, NON_FEATURE_COLS)
     return df
 
@@ -236,7 +173,7 @@ def data_prep(df):
 # ---------------------------------------------------------------------------
 
 def build_daily():
-    df = pd.read_csv(os.path.join(IN_DIR, "preprocessed_daily.csv"),
+    df = pd.read_csv(os.path.join(IN_DIR, "final_daily.csv"),
                       parse_dates=["date"], dtype={"station_id": str}, low_memory=False)
 
     df = add_calendar_features(df)
@@ -245,7 +182,7 @@ def build_daily():
     df = add_weather_features(df)
     df = add_target_transform(df)
     df = add_lag_features(df)
-    df = data_prep(df)
+    df = finish_lag_cleanup(df)
 
     out_path = os.path.join(OUT_DIR, "features_daily.csv")
     df.to_csv(out_path, index=False)
@@ -254,7 +191,7 @@ def build_daily():
 
 
 def build_hourly():
-    df = pd.read_csv(os.path.join(IN_DIR, "preprocessed_hourly.csv"),
+    df = pd.read_csv(os.path.join(IN_DIR, "final_hourly.csv"),
                       parse_dates=["date"], dtype={"station_id": str}, low_memory=False)
 
     df = add_calendar_features(df)
@@ -266,7 +203,7 @@ def build_hourly():
     df["_sort_key"] = df["date"].astype(str) + "-" + df["hour_ending"].astype(str).str.zfill(2)
     df = add_lag_features(df, sort_col="_sort_key")
     df = df.drop(columns=["_sort_key"])
-    df = data_prep(df)
+    df = finish_lag_cleanup(df)
 
     out_path = os.path.join(OUT_DIR, "features_hourly.csv")
     df.to_csv(out_path, index=False)

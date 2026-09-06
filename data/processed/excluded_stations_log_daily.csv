@@ -1,0 +1,5 @@
+station_id,reason,matched_aq_site,rows_dropped
+6149,no NO2 coverage at matched AQ site,ORANGE (no NO2),642
+6141,no NO2 coverage at matched AQ site,ORANGE (no NO2),150
+6105,no NO2 coverage at matched AQ site,BATHURST (no NO2 sensor),712
+6116,no NO2 coverage at matched AQ site,LISMORE (no continuous NO2),169

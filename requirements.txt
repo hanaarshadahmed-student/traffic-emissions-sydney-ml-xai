@@ -1,2 +1,5 @@
 pandas>=2.0
 numpy>=1.24
+holidays>=0.50
+python-calamine>=0.2
+pyshp>=2.3
