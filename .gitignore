@@ -8,5 +8,15 @@ data/raw/92080DO001_202006.xls
 
 # macOS metadata files.
 .DS_Store
+
 C:\Users\hanaa\.vscode\traffic-emissions-sydney-ml-xai\data\raw\speed_zones\Speed_Zones.shp
 data/raw/speed_zones/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Locally generated advanced feature datasets
+data/processed/features_daily_advanced.csv
+data/processed/features_hourly_advanced.csv
+data/processed/advanced_feature_manifest.json
