@@ -1,61 +1,111 @@
 # Traffic Emissions Sydney — ML + XAI
 
-Predicting traffic-related CO₂ emissions across selected Sydney roads using
-machine learning, with explainable AI (SHAP) to identify key drivers.
+Predicting **NO₂ concentration** near NSW traffic stations from traffic
+volume, weather, and station metadata, using machine learning, with
+explainable AI (SHAP) to identify key drivers.
 
-See `DATA.md` for full details on data sources, collection decisions, and
-the final processed dataset.
+> The project originally targeted a *computed* CO₂-estimate variable
+> across 3 Sydney-only stations. It has since pivoted to a **directly
+> measured** NO₂ target (per supervisor guidance — computed/estimated
+> targets weren't acceptable) across 15 candidate stations spanning NSW,
+> not just Sydney. See `doc/Data.md` for the full history and current
+> data-quality decisions.
 
 ## Project structure
 
 ```
 data/
-  raw/         Raw downloaded files (traffic, weather, NGA factors) — not tracked in git
-  processed/   Output of the preprocessing pipeline (merged_dataset.csv)
-notebooks/     Exploration, feature engineering, modelling, XAI (in order)
+  raw/         Raw downloaded files — not tracked in git
+    traffic/       TfNSW Traffic Volume Viewer exports, per station
+    weather/       Metro AQ-portal hourly weather + BOM rural daily weather
+    emissions/     Metro AQ-portal hourly pollutant data (incl. NO2)
+    air_quality/   nsw_air_quality_sites.json — optional, enables AQ-site verification
+    speed_zones/   Speed_Zones.{shp,shx,dbf,prj} — optional, enables posted-speed
+                   matching. NOT in git (individual files exceed GitHub's size
+                   limits) — download from TfNSW and place here manually.
+  processed/   Output of each pipeline stage (see "Running the pipeline" below)
+notebooks/
+  01_data_exploration.ipynb     EDA — the most current/complete notebook
+  02_feature_engineering.ipynb  (not yet built)
+  03_model_experiments.ipynb    (not yet built)
+  04_xai_analysis.ipynb         (not yet built)
 src/
-  01_data_ingestion.py
-  02_data_preprocessing.py   
-  03_feature_engineering.py  (next step)
-  04_models.py                (next step)
-  05_evaluation.py             (next step)
-  05_explainability.py         (next step)
+  01_data_ingestion.py         Combine raw traffic/weather/emissions into one dataset
+                                per resolution, plus AQ-site verification and
+                                posted-speed matching
+  02_eda.py                    Row-level cleaning (drop no-NO2-coverage stations,
+                                sanity checks, dedup) — despite the filename, this
+                                is preprocessing, not exploratory analysis; see note below
+  03_data_preprocessing.py     Outlier reporting + AQ-match-quality weighting,
+                                missing-value imputation, redundant-column drops,
+                                station encoding
+  04_feature_engineering.py    Pure feature creation (calendar, road type, lags,
+                                cyclical encoding, target transform) + the lag-warmup
+                                cleanup that creation itself introduces
+  05_models.py                 (not yet built)
+  06_evaluation.py             (not yet built)
+  07_explainability.py         (not yet built)
 results/       Model outputs, figures, SHAP plots
 ```
 
+**Note on `02_eda.py`:** the numbering here doesn't match the content —
+it's a leftover from a mid-project renumbering. It currently holds
+preprocessing logic (drop stations with no NO2 coverage, validate ranges,
+deduplicate), not EDA. The real exploratory work lives in
+`notebooks/01_data_exploration.ipynb`. Rename fix pending — flagging here
+so nobody goes looking for EDA logic in the wrong file.
+
 ## Setup
-#For windows
+
 ```powershell
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
+`pyshp`, `holidays`, and `python-calamine` are all required (not just
+`pandas`/`numpy`) — `01_data_ingestion.py` uses `holidays` for real NSW
+public-holiday dates, `python-calamine` to read the AQ-portal `.xls`
+exports, and `pyshp` for the optional posted-speed matching.
+
 ## Running the pipeline
 
-### 1. Build the merged dataset
+Run every script **from the repo root**, not from inside `src/` — all
+paths (`data/raw/...`, `data/processed/...`) are relative to the project
+root, not to the script's own location.
 
 ```powershell
-python src/data_preprocessing.py
+python src/01_data_ingestion.py
+python src/02_eda.py
+python src/03_data_preprocessing.py
+python src/04_feature_engineering.py
 ```
 
-Reads all files in `data/raw/`, builds one merged hourly dataset per traffic
-station (traffic volume + weather + temporal features + computed CO₂ target),
-and writes it to `data/processed/merged_dataset.csv`.
+1. **`01_data_ingestion.py`** — builds `data/processed/final_combined_dataset_daily.csv`
+   (all 15 candidate stations) and `final_combined_dataset_hourly.csv` (the
+   8 stations with both hourly weather and hourly NO2). Also runs AQ-site
+   verification and posted-speed matching if the optional files under
+   `data/raw/air_quality/` and `data/raw/speed_zones/` are present —
+   skipped with a warning otherwise, not a failure.
+2. **`02_eda.py`** — drops stations with zero NO2 coverage, validates
+   traffic/temperature ranges, drops rows missing the NO2 target,
+   deduplicates. Outputs `preprocessed_daily.csv` / `preprocessed_hourly.csv`.
+3. **`03_data_preprocessing.py`** — reports NO2 outliers per station
+   (doesn't remove them — see `doc/Data.md`), adds `aq_quality_weight`,
+   imputes missing weather values, drops redundant/unused columns,
+   one-hot encodes station ID. Outputs `final_daily.csv` / `final_hourly.csv`.
+4. **`04_feature_engineering.py`** — calendar features, road-type encoding,
+   traffic ratios, weather flags, log-target transform, lag/rolling
+   features (daily) or cyclical hour encoding (hourly). Outputs
+   `features_daily.csv` / `features_hourly.csv` — zero NaNs, model-ready.
 
-Prints a summary on completion: total rows, missing weather values, and
-per-station row counts. Check this output before moving on — large gaps
-here should be investigated, not ignored.
-
-### 2. Next steps (not yet built)
-
-- `notebooks/01_data_exploration.ipynb` — EDA on `merged_dataset.csv`
-- `notebooks/02_feature_engineering.ipynb` — lag features, cyclical encoding
-- `notebooks/03_model_experiments.ipynb` — RF, XGBoost, LSTM comparison
-- `notebooks/04_xai_analysis.ipynb` — SHAP analysis
+Each script prints a summary on completion (row counts, dropped stations,
+imputation coverage). Check this output before moving to the next step.
 
 ## Data scope
 
-3 traffic stations across 2 Sydney LGAs (Parramatta, Bankstown), 2 years of
-hourly data (2024–2025). See `DATA.md` for why these specific stations and
-the full list of data-quality decisions.
+15 candidate stations across NSW (not Sydney-only), 2024–2025 traffic
+data. 11 stations have usable NO2 coverage for the daily model; 8 of
+those also have hourly-resolution weather and NO2 for the hourly model.
+See `doc/Data.md` for the full station list, the AQ-site match-quality
+findings, and every data-quality decision and its justification.

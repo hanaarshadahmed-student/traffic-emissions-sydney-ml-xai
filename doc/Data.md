@@ -2,96 +2,152 @@
 
 ## Overview
 
-This project predicts CO₂ emissions from vehicle traffic on 3 Sydney roads.
-There is no dataset that directly measures road-level CO₂ — the target
-variable is **computed** from traffic volume, published fuel consumption
-rates, and official emission factors (see "Target variable" below).
+This project predicts **NO₂ concentration** (`no2_pphm`) near NSW traffic
+stations from traffic volume, weather, and station metadata.
+
+**History:** the project originally targeted a *computed* CO₂-estimate
+(traffic volume × fuel-consumption rate × emission factor) across 3
+Sydney-only stations. The supervisor ruled out computed/estimated targets
+— see the "no-estimation constraint" below — so the project pivoted to
+`no2_pphm`, which is **directly measured** at NSW Air Quality Network
+sites, and expanded from 3 Sydney stations to 15 candidate stations
+spanning NSW, matched to their nearest AQ monitoring site.
 
 ## Sources
 
 | Data | Source | Access |
 |---|---|---|
-| Traffic volume (hourly, by vehicle class) | Transport for NSW, Traffic Volume Viewer | maps.transport.nsw.gov.au/egeomaps/traffic-volumes |
-| Station metadata (LGA, road type, classifier flag) | Transport for NSW, Traffic Volume Viewer | Same as above — "Station Information" download |
-| Weather (max temperature, rainfall, daily) | Bureau of Meteorology, Climate Data Online | reg.bom.gov.au/climate/data |
-| Fuel consumption rates (L/100km by vehicle class, NSW) | ABS Survey of Motor Vehicle Use, 2020 (Table 6) | `data/raw/92080DO001_202006.xls` |
-| Emission factors (kg CO₂-e per litre of fuel) | Australian National Greenhouse Accounts Factors 2025, Table 9 | dcceew.gov.au/climate-change/publications/national-greenhouse-accounts-factors-2025 |
+| Traffic volume (daily/hourly, by vehicle class) | Transport for NSW, Traffic Volume Viewer | maps.transport.nsw.gov.au/egeomaps/traffic-volumes |
+| Weather (metro stations, hourly) | NSW Air Quality Network portal | airquality.nsw.gov.au |
+| Weather (rural stations, daily) | Bureau of Meteorology, Climate Data Online | reg.bom.gov.au/climate/data |
+| NO2/CO/ozone (metro stations, hourly) | NSW Air Quality Network portal | Same as metro weather |
+| AQ site registry (137 sites, lat/lon) | NSW Air Quality Network | `data/raw/air_quality/nsw_air_quality_sites.json` — optional, enables AQ-site verification |
+| Speed zones (posted speed limits, ~447k segments) | Transport for NSW | `data/raw/speed_zones/Speed_Zones.shp` — optional, enables posted-speed matching. Not in git (too large for GitHub) |
 
 ## Traffic stations used
 
-Selected from an initial screen of 20 candidate permanent classifier
-stations across Sydney LGAs, narrowed to 3 based on actual data
-completeness (not just being on the map):
+All 15 candidate stations, with their matched AQ site and the haversine
+distance to it:
 
-| Station ID | Road | LGA | Missing days (of 731) | Directions |
-|---|---|---|---|---|
-| 50240 | Briens Road | Parramatta | 3.6% | 2 (Eastbound/Westbound) |
-| 50260 | Silverwater Road | Parramatta | 5.1% | 2 (Northbound/Southbound) |
-| 7272 | Edgar Street | Bankstown | 10.7% | 1 (Southbound only — documented limitation) |
+| Station ID | Road | Suburb | LGA | Matched AQ site | Distance (km) |
+|---|---|---|---|---|---|
+| MUB001 | Melbourne Street | Mulwala | Corowa | ALBURY | 83.2 |
+| 6135-PR | M31 Hume Highway | Bowning | Yass Valley | GOULBURN | 78.1 |
+| 6149 | Newell Highway | Tomingley | Narromine | ORANGE (no NO2) | 109.2 |
+| 6141 | Newell Highway | Forbes | Forbes | ORANGE (no NO2) | 106.1 |
+| 6105 | Great Western Highway | Meadow Flat | Lithgow | BATHURST (no NO2 sensor) | 32.7 |
+| 6124 | Macleay Valley Way | South Kempsey | Kempsey | PORT MACQUARIE | 36.9 |
+| 6116 | Pacific Highway | Wardell | Ballina | LISMORE (no continuous NO2) | 23.8 |
+| 7212 | Stewart Avenue | Newcastle West | Newcastle | NEWCASTLE | 0.2 |
+| 7211 | Lily Lane | Adamstown | Newcastle | NEWCASTLE | 4.5 |
+| 6119-PR | Pacific Highway | Nabiac | Greater Taree | PORT MACQUARIE | 87.3 |
+| 7216 | Gladstone Avenue | Wollongong | Wollongong | WOLLONGONG | 0.6 |
+| 6109 | M23 Federal Highway | Yarra | Goulburn Mulwaree | GOULBURN | 13.0 |
+| 10011 | New South Head Road | Edgecliff | Woollahra | COOK AND PHILLIP | 1.8 |
+| 100001 | Cambridge Street | Canley Heights | Fairfield | LIVERPOOL | 4.8 |
+| 6178-PR | Picton Road | Cordeaux | Wollongong | WOLLONGONG | 8.2 |
 
-**Stations considered and dropped:**
-- 10011 (New South Head Rd, Woollahra) — data ends March 2025, missing entire second year
-- 51235 (Victoria Rd, Ryde) — 28.2% missing days, worst coverage of all candidates
-- 29005, 7139, 7270 — usable as backups but not selected; higher missing % or single-direction only
+**Dropped for zero NO2 coverage** (Step 1, `02_eda.py`): `6105`, `6116`,
+`6141`, `6149` — all four are matched to AQ sites explicitly noted as
+lacking a working NO2 sensor. **11 stations remain for the daily model.**
+Of those, **8 have both hourly weather and hourly NO2** from a metro AQ
+site and qualify for the hourly model (rural/BOM-weather stations only
+report daily min/max temp and rainfall, so there's no hourly weather to
+build from for the other 3).
 
-## Weather stations used
+## AQ-site match verification
 
-BOM stations are far sparser than traffic stations, so 2 stations cover all 3 traffic sites:
+Each station's `aq_site` above was originally chosen by hand. It's cross-
+checked in `01_data_ingestion.py` (`verify_aq_site_matches()`) against
+the true nearest geocoded AQ site (haversine distance, 137-site
+registry). **5 of 15 stations don't match their true nearest site:**
 
-| Station | Name | Covers | Notes |
+| Station | Hardcoded site | True nearest site | Distance |
 |---|---|---|---|
-| 066124 | Parramatta North (Masons Drive) | Briens Rd, Silverwater Rd | Manual station — max temp + rainfall only, no humidity/wind sensors |
-| 066137 | Bankstown Airport AWS | Edgar St | Automatic Weather Station — same variables used for consistency |
+| MUB001 | ALBURY (83.2km) | Rand | 59.4km |
+| 6149 | ORANGE (109.2km) | Parkes | 52.4km |
+| 6141 | ORANGE (106.1km) | Parkes | 40.5km |
+| 6119-PR | PORT MACQUARIE (87.3km) | Taree | 24.1km |
+| 100001 | LIVERPOOL (4.8km) | LIVERPOOL SWAQS | 4.6km |
 
-**Dropped weather variables:** humidity and wind speed were considered but
-not available at these two stations without switching to different (further
-away) stations. Temperature and rainfall are the dominant weather features
-in the reviewed literature, so this was accepted as a reasonable scope cut.
+The registry doesn't record which sites measure NO2, so a farther match
+can be the deliberate, correct choice (this is very likely true for
+`6149`/`6141`, both already excluded above). `100001`'s "mismatch" is a
+0.2km difference against what's almost certainly the same physical site
+under a different registry label, not a real error. `MUB001` and
+`6119-PR` remain flagged (`aq_match_flag = REVIEW`) after the Step 1
+drop and are carried through the rest of the pipeline as lower-confidence
+(see "Data-quality decisions" below), not excluded.
 
-## Target variable: `co2_estimate`
+## Target variable: `no2_pphm`
 
-Computed per hour, per station:
+Measured directly at the matched AQ site (parts per hundred million),
+sourced from the NSW Air Quality Network portal. Not computed, not
+estimated — this is the reason for the pivot away from the earlier CO2
+approach (the supervisor's "no-estimation constraint").
 
-```
-co2_estimate (kg) = (volume_light × 0.111 L/km × 2.31 kg CO2-e/L)
-                   + (volume_heavy × 0.28  L/km × 2.72 kg CO2-e/L)
-```
+## Posted speed limit
 
-- **0.114 L/km** (11.4 L/100km) — Passenger vehicles, **New South Wales**, ABS Survey of Motor Vehicle Use, 12 months ended 30 June 2020, Table 6 (`data/raw/92080DO001_202006.xls`)
-- **0.28 L/km** (28 L/100km) — Rigid trucks, **New South Wales**, same source. Chosen over Articulated trucks (51 L/100km in NSW) since TfNSW's "Heavy Vehicles" classification on arterial roads is dominated by rigid trucks and buses rather than long-haul articulated trucks.
+`posted_speed_kmh` / `speed_zone_type` are added by matching each
+station's coordinates to the nearest line segment in the TfNSW speed
+zones shapefile (`match_speed_zones()` in `01_data_ingestion.py`, one
+pass over ~447k records, Web Mercator point-to-segment distance).
+**Caveat:** `speed_zone_type` describes the *kind of speed zone* (e.g.
+`Ordinary Permanent`, `School`, `Variable`), not a road hierarchy — it
+is not a substitute for `road_type` (built separately in
+`04_feature_engineering.py` from keyword matching on the station name).
+`posted_speed_kmh` correlates with NO2 at r=-0.36 station-level, notably
+stronger than the *pooled* `road_type` relationship (r=-0.019) — it's
+kept as a real numeric feature precisely because it splits stations
+`road_type`'s 3-bucket keyword heuristic lumps together.
 
-State-specific (NSW) rates were used rather than the national average, since this project is Sydney-specific.
+## Data-quality decisions (`03_data_preprocessing.py`)
 
-**Note:** the ABS Survey of Motor Vehicle Use was discontinued after this release — it is the most recent official Australian source available, but reflects 2020 vehicle fleet efficiency, not 2024–2025. Actual fuel consumption has likely improved slightly since, meaning `co2_estimate` is a small conservative (over-)estimate. Worth one sentence on this in the methodology limitations.
-- **2.31 kg CO2-e/L** — petrol, Scope 1 (tailpipe), NGA Factors 2025 Table 9, cars/light commercial vehicles
-- **2.72 kg CO2-e/L** — diesel, Scope 1 (tailpipe), NGA Factors 2025 Table 9, heavy duty vehicles (Euro IV+)
+**NO2 outliers (IQR method, per station):** `6119-PR` (7.9%), `6124`
+(7.5%), and `6109` (5.0%) show the highest outlier rates — the first two
+are also the largest-`aq_distance_km` stations remaining after Step 1.
+Not treated as sensor error: an IQR flag on air-quality data can just as
+easily be a genuine pollution episode as a fault, and here the pattern
+tracks a known data-quality variable (AQ-match distance) rather than
+anything indicating instrument malfunction. Reported, not removed —
+see references in `03_data_preprocessing.py`'s docstring.
 
-Scope 1 (direct combustion) was used rather than Scope 1+3, since this
-project models on-road tailpipe emissions, not full fuel lifecycle.
+**`aq_quality_weight`:** rather than dropping the 2 remaining
+`REVIEW`-flagged stations (`MUB001`, `6119-PR` in the daily set; only
+`100001` remains flagged in the smaller hourly set), they're kept with
+`aq_quality_weight = 0.5` (vs. `1.0` for `OK` stations) — an explicit,
+inspectable column rather than a silent exclusion. This is supported by
+three independent findings pointing the same way (weaker traffic-NO2
+correlation at greater AQ distance, r=-0.759; weaker mean correlation
+for `REVIEW` stations, though n=3 is small; elevated NO2 outlier rate at
+the same two stations) — but the sample size means this is a judgement
+call, not a statistically settled one. Intended for use as a
+`sample_weight` argument in modelling, not yet wired into `05_models.py`.
 
-**Important limitation to note in the methodology:** because the target is
-computed from traffic volume rather than independently measured, feature
-importance results (SHAP) involving `volume_light`/`volume_heavy` will be
-partly circular. Consider excluding raw volume from the feature set when
-interpreting XAI results for weather/temporal drivers specifically.
+**Missing values:** `wind_speed_ms`/`wind_dir_deg` are structurally
+absent for BOM (rural) stations — a `has_wind_data` flag is added before
+filling, so a model can distinguish "no wind sensor" from "average wind."
+`temp_c`/`rain_mm` are ~0.3% missing (sensor gaps, not structural) and
+filled with the median. `temp_max_c`/`temp_min_c` and `co_ppm`/
+`ozone_pphm` are dropped as redundant/unused rather than imputed.
+
+**Known limitation:** the median values used above are computed across
+the *entire* dataset. If a chronological train/test split is used in
+`05_models.py`, this technically leaks test-period information into the
+fill value used for training rows. Not yet fixed — requires the split
+boundary to be chosen first (compute the median on train rows only,
+apply the same value to test).
 
 ## Final processed dataset
 
-`data/processed/merged_dataset.csv` — one row per station per hour.
+`data/processed/features_daily.csv` (4,861 rows, 50 columns) and
+`features_hourly.csv` (66,777 rows, 49 columns) — output of
+`04_feature_engineering.py`, zero NaNs, ready for modelling. Includes:
+traffic/weather/NO2 raw columns, calendar features (day of week, season,
+weekend flag), one-hot `road_` and `season_`/`stn_` encodings, `heavy_pct`,
+`is_rainy`, `log_no2_pphm`, lag/rolling traffic features (daily) or
+`hour_sin`/`hour_cos` (hourly), `posted_speed_kmh`, `aq_distance_km`, and
+`aq_quality_weight`/`aq_match_flag` (metadata, excluded from the
+zero-NaN feature check but available for weighting).
 
-| Column | Description |
-|---|---|
-| `timestamp` | Hourly datetime |
-| `station_id`, `road`, `lga` | Station identity |
-| `volume_light`, `volume_heavy` | Vehicle counts (both directions summed) |
-| `max_temp`, `rainfall` | Daily weather, applied across all hours of that day |
-| `hour_of_day`, `day_of_week`, `is_weekend`, `month` | Derived from timestamp |
-| `public_holiday`, `school_holiday` | From TfNSW source data |
-| `co2_estimate` | Computed target variable (kg CO2-e) |
-
-**Known gaps:**
-- 744 rows missing rainfall (Parramatta 2025 data was incomplete at collection time)
-- 48 rows missing max temperature
-- Edgar Street (Bankstown) is single-direction only — represents half the road's actual traffic
-
-Rebuild with: `python src/01_data_ingestion.py` (see main `README.md`).
+Rebuild with the 4-script pipeline in the main `README.md`.
