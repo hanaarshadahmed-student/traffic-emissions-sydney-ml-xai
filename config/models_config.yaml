@@ -1,0 +1,32 @@
+# Which models to run, and with what settings -- edit this file, not the
+# code, for ordinary experimentation (turning a model on/off, changing a
+# hyperparameter, switching grain or feature set).
+#
+# Only random_forest is built so far. decision_tree/svr/xgboost blocks
+# get added here once their models/<name>.py files exist.
+#
+# grain:         "daily" or "hourly"
+# feature_sets:  which feature_manifest.json feature sets to train+evaluate
+#                on, one run each:
+#                  - exogenous       traffic/weather/calendar/road/station
+#                                    only (no NO2 history)
+#                  - autoregressive  only NO2's own lag/rolling features
+#                  - all             everything combined
+# split:         which split to evaluate on -- "val" while iterating,
+#                switch to "test" only once for the final reported numbers
+
+grain: daily
+feature_sets:
+  - exogenous
+  - all
+split: val
+
+models:
+  random_forest:
+    enabled: true
+    params:
+      n_estimators: 300
+      max_depth: null
+      min_samples_leaf: 5
+      n_jobs: -1
+      random_state: 42
