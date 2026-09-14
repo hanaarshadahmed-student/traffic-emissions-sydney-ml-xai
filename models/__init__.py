@@ -5,9 +5,8 @@ Maps the model names used in config/models_config.yaml to each model's
 build_model() function. src/06_run_models.py imports REGISTRY from here
 and never needs to know the individual model files exist.
 
-Only random_forest is built so far -- decision_tree, svr, and
-xgboost_model follow the same pattern once it's confirmed this one
-works end to end.
+random_forest and decision_tree are built and registered now -- svr and
+xgboost_model follow the same pattern whenever they're needed next.
 
 To add a new model:
 1. Create models/<your_model>.py with a NAME string and a
@@ -19,8 +18,9 @@ To add a new model:
 Nothing in src/06_run_models.py needs to change.
 """
 
-from . import random_forest
+from . import decision_tree, random_forest
 
 REGISTRY = {
     random_forest.NAME: random_forest.build_model,
+    decision_tree.NAME: decision_tree.build_model,
 }
