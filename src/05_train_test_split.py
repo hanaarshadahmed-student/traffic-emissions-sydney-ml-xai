@@ -44,16 +44,14 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
+from split_utils import assign_chronological_split as _shared_assign_split
+
 warnings.filterwarnings("ignore", message="DataFrame is highly fragmented")
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 PROCESSED_DIR = ROOT_DIR / "data" / "processed"
 SPLITS_DIR = PROCESSED_DIR / "splits"
 MANIFEST_PATH = PROCESSED_DIR / "feature_manifest.json"
-
-TRAIN_FRAC = 0.70
-VAL_FRAC = 0.15
-# test gets the remainder (~0.15)
 
 GRAIN_CONFIG = {
     "daily": {
@@ -73,22 +71,12 @@ def load_manifest() -> dict:
 
 
 def assign_chronological_split(df: pd.DataFrame, date_col: str) -> pd.Series:
-    """Per-station chronological split. Each station's own rows are sorted
-    by time and cut at the train/val boundary and the val/test boundary
-    independently -- a station observed for 6 months and one observed for
-    2 years both end up with ~70/15/15 of their own timeline in each
-    split, rather than one global date cutoff which would leave short-
-    history stations entirely in one split."""
-    split = pd.Series(index=df.index, dtype=object)
-    for station_id, group in df.sort_values(date_col).groupby("station_id"):
-        n = len(group)
-        train_end = int(np.floor(n * TRAIN_FRAC))
-        val_end = train_end + int(np.floor(n * VAL_FRAC))
-        labels = np.full(n, "test", dtype=object)
-        labels[:train_end] = "train"
-        labels[train_end:val_end] = "val"
-        split.loc[group.index] = labels
-    return split
+    """Thin wrapper around split_utils' shared implementation -- kept here
+    under the same name so nothing else in this file has to change.
+    Defined once in split_utils so 03_data_preprocessing.py's train-only
+    imputation and this script's train/val/test split can never drift
+    apart into disagreeing about which rows are "train"."""
+    return _shared_assign_split(df, date_col)
 
 
 def is_binary_column(series: pd.Series) -> bool:

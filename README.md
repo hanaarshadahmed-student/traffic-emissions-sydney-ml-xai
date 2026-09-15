@@ -25,13 +25,17 @@ data/
                    limits) — download from TfNSW and place here manually.
   processed/   Output of each pipeline stage (see "Running the pipeline" below)
 config/
-  models_config.yaml           Which models run, their hyperparameters, and
-                                the grain/feature_set/split to evaluate on.
-                                Only random_forest is enabled so far.
+  models_config.yaml           Which models run, their hyperparameters, the
+                                grain/feature_set/split to evaluate on, and
+                                which pipeline stage(s) src/run_pipeline.py
+                                runs. random_forest and decision_tree are
+                                enabled so far.
 models/
   __init__.py                  Registry mapping a config model name to its
-                                build_model() function. Only random_forest
-                                is registered right now.
+                                build_model() function. random_forest and
+                                decision_tree are registered; svr.py,
+                                xgboost_model.py follow the same pattern
+                                once those are needed.
   random_forest.py             Defines ONLY the estimator (a few lines —
                                 NAME + build_model()). decision_tree.py,
                                 svr.py, xgboost_model.py follow the same
@@ -42,6 +46,10 @@ notebooks/
   03_model_experiments.ipynb    (not yet built)
   04_xai_analysis.ipynb         (not yet built)
 src/
+  run_pipeline.py              Runner: executes 01-06 in order (or just one
+                                stage) based on the `pipeline.stage` setting
+                                in config/models_config.yaml. See "Running
+                                the pipeline" below.
   01_data_ingestion.py         Combine raw traffic/weather/emissions into one dataset
                                 per resolution, plus AQ-site verification and
                                 posted-speed matching
@@ -50,7 +58,9 @@ src/
                                 is preprocessing, not exploratory analysis; see note below
   03_data_preprocessing.py     Outlier reporting + AQ-match-quality weighting,
                                 missing-value imputation, redundant-column drops,
-                                station encoding
+                                station encoding. Imputation medians are fit on
+                                TRAIN-only rows (via split_utils.py) so no
+                                val/test-period value leaks into a training row.
   04_feature_engineering.py    Feature creation: calendar (cyclical + season one-hot),
                                 station metadata, road-type encoding (both RMS
                                 classification and a coarse Highway/Major Road/Local
@@ -63,6 +73,10 @@ src/
                                 + feature scaling (fit on train only). Writes
                                 data/processed/splits/{grain}_{train,val,test}.csv,
                                 {grain}_scaler.joblib, and split_manifest.json.
+  split_utils.py               Shared per-station chronological split logic used by
+                                BOTH 03 (to fit train-only imputation medians) and 05
+                                (to make the actual train/val/test split) — one
+                                definition of "train" so the two steps can't disagree.
   model_utils.py               Shared load_split() / evaluate() / save_result()
                                 used by 06_run_models.py, so every model trains
                                 and is scored on the exact same rows/features and
@@ -70,7 +84,7 @@ src/
                                 (data/processed/model_results/results.json).
   06_run_models.py             Reads config/models_config.yaml, trains + evaluates
                                 every enabled model from models/, appends results.
-                                Currently only random_forest is wired up.
+                                random_forest and decision_tree are wired up now.
   07_deep_learning_*.py        (not yet built) LSTM + GRU on the hourly grain
   08_hyperparameter_tuning.py  (not yet built)
   09_evaluation.py             (not yet built) Final RMSE/MAE/R² comparison table
@@ -104,7 +118,41 @@ exports, and `pyshp` for the optional posted-speed matching.
 
 Run every script **from the repo root**, not from inside `src/` — all
 paths (`data/raw/...`, `data/processed/...`) are relative to the project
-root, not to the script's own location.
+root, not to the script's own location. `src/run_pipeline.py` already
+does this for you (it sets the working directory itself), so it's the
+easiest way to run things either way.
+
+### Recommended: `run_pipeline.py`
+
+```powershell
+python src/run_pipeline.py
+```
+
+It reads `pipeline.stage` from `config/models_config.yaml`:
+
+```yaml
+pipeline:
+  stage: all       # run every stage, 01 -> 06, wiping data/processed/
+                   # first (except model_results/, the cross-run results
+                   # log) so this run never mixes with a stale one
+  stage: models    # run ONLY 06_run_models.py, reusing whatever's
+                   # already in data/processed/splits/ — the fast path
+                   # once everything through 05 is already built
+  # or: ingest | eda | preprocess | features | split
+```
+
+`--stage` on the command line overrides the yaml for a one-off, e.g.
+`python src/run_pipeline.py --stage features` to redo just feature
+engineering without touching the yaml. Before running a single stage it
+checks the previous stage's output files actually exist and tells you
+plainly which stage to run first if not, instead of letting the script
+fail with a less obvious error. It streams each stage's own print
+output live, times it, and prints a summary table at the end.
+
+### Manual, stage by stage
+
+Equivalent to `stage: all`, run one script at a time if you want to
+inspect the output between steps:
 
 ```powershell
 python src/01_data_ingestion.py
@@ -127,7 +175,11 @@ python src/06_run_models.py
 3. **`03_data_preprocessing.py`** — reports NO2 outliers per station
    (doesn't remove them — see `doc/Data.md`), adds `aq_quality_weight`,
    imputes missing weather values, drops redundant/unused columns,
-   one-hot encodes station ID. Outputs `final_daily.csv` / `final_hourly.csv`.
+   one-hot encodes station ID. Imputation medians are fit on TRAIN-only
+   rows (via `split_utils.py`, the same per-station chronological split
+   `05` uses) so a training row's imputed value never carries information
+   from a row that ends up in val/test. Outputs `final_daily.csv` /
+   `final_hourly.csv`.
 4. **`04_feature_engineering.py`** — calendar (cyclical + season one-hot),
    station metadata, two road-type encodings (RMS classification + a
    coarse Highway/Major Road/Local Street bucket), directional traffic,
@@ -145,9 +197,9 @@ python src/06_run_models.py
    `{grain}_scaler.joblib`, and `split_manifest.json`.
 6. **`06_run_models.py`** — reads `config/models_config.yaml` and trains +
    evaluates every enabled model from `models/`, appending results to
-   `data/processed/model_results/results.json`. Only `random_forest` is
-   built and enabled right now — expect one line of output per feature
-   set (`exogenous`, `all`).
+   `data/processed/model_results/results.json`. `random_forest` and
+   `decision_tree` are built and enabled right now — expect one line of
+   output per model per feature set (`exogenous`, `all`).
 
 `07`–`10` remain placeholders. A working prototype covering all four
 baseline models (decision tree, random forest, SVR, XGBoost) was built

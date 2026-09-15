@@ -11,6 +11,8 @@ Output: data/processed/final_daily.csv      (zero NaNs in raw columns,
 import pandas as pd
 import os
 
+from split_utils import train_only_median
+
 IN_DIR = "data/processed"
 OUT_DIR = "data/processed"
 
@@ -75,24 +77,37 @@ def drop_unused_secondary_pollutants(df):
     return df.drop(columns=[c for c in ("co_ppm", "ozone_pphm") if c in df.columns])
 
 
-def impute_wind(df):
+def impute_wind(df, label, time_cols):
     """wind_speed_ms/wind_dir_deg are structurally absent for BOM (rural)
     stations. has_wind_data preserves that distinction; the NaNs are then
-    filled with the median of stations that DO have wind data purely so the
-    column contains no NaNs -- has_wind_data is the real signal."""
+    filled with a single value so the column contains no NaNs --
+    has_wind_data is the real signal, the filled number is just a
+    placeholder for models that can't take NaN.
+
+    That placeholder is the median computed over TRAIN rows only (per
+    05_train_test_split.py's chronological per-station split, via
+    split_utils). Using the whole dataset's median here -- including rows
+    that will later become val/test -- would leak those rows' distribution
+    into every training row's wind features, and from there into every
+    rolling/lag feature 04_feature_engineering.py builds on top of them."""
     df["has_wind_data"] = df["wind_speed_ms"].notna().astype(int)
     for col in ("wind_speed_ms", "wind_dir_deg"):
         if col in df.columns:
-            df[col] = df[col].fillna(df[col].median())
+            fill_value = train_only_median(df, col, time_cols)
+            df[col] = df[col].fillna(fill_value)
+            log(f"[{label}] {col}: filled NaNs with TRAIN-only median {fill_value:.3f}")
     return df
 
 
-def impute_remaining_small_gaps(df):
+def impute_remaining_small_gaps(df, label, time_cols):
     """temp_c and rain_mm are only ~0.3% missing -- small, close to random
-    sensor gaps, not a structural pattern. Filled with the median."""
+    sensor gaps, not a structural pattern. Filled with the TRAIN-only
+    median (see impute_wind's docstring for why train-only, not global)."""
     for col in ("temp_c", "rain_mm"):
         if col in df.columns:
-            df[col] = df[col].fillna(df[col].median())
+            fill_value = train_only_median(df, col, time_cols)
+            df[col] = df[col].fillna(fill_value)
+            log(f"[{label}] {col}: filled NaNs with TRAIN-only median {fill_value:.3f}")
     return df
 
 
@@ -105,11 +120,11 @@ def one_hot_encode_station(df):
     return pd.concat([df, dummies], axis=1)
 
 
-def clean_raw_columns(df, label):
+def clean_raw_columns(df, label, time_cols):
     df = drop_redundant_weather_columns(df)
     df = drop_unused_secondary_pollutants(df)
-    df = impute_wind(df)
-    df = impute_remaining_small_gaps(df)
+    df = impute_wind(df, label, time_cols)
+    df = impute_remaining_small_gaps(df, label, time_cols)
     df = one_hot_encode_station(df)
     raw_nan_cols = [c for c in ("temp_c", "rain_mm", "wind_speed_ms", "wind_dir_deg") if c in df.columns]
     remaining = df[raw_nan_cols].isna().sum()
@@ -121,13 +136,13 @@ def clean_raw_columns(df, label):
     return df
 
 
-def finalize(df, label):
+def finalize(df, label, time_cols):
     log(f"\n{'='*60}\nFinal preprocessing [{label}]\n{'='*60}")
     report_no2_outliers(df, label)
     df = add_aq_quality_weight(df, label)
     log(f"[{label}] posted_speed_kmh present: {'posted_speed_kmh' in df.columns} "
         f"(kept as numeric feature -- see docstring point 3)")
-    df = clean_raw_columns(df, label)
+    df = clean_raw_columns(df, label, time_cols)
     return df
 
 
@@ -136,13 +151,13 @@ def run():
 
     daily = pd.read_csv(os.path.join(IN_DIR, "preprocessed_daily.csv"),
                          parse_dates=["date"], dtype={"station_id": str}, low_memory=False)
-    daily = finalize(daily, "DAILY")
+    daily = finalize(daily, "DAILY", time_cols=["date"])
     daily.to_csv(os.path.join(OUT_DIR, "final_daily.csv"), index=False)
     log(f"\nSaved -> {OUT_DIR}/final_daily.csv ({len(daily)} rows, {len(daily.columns)} columns)")
 
     hourly = pd.read_csv(os.path.join(IN_DIR, "preprocessed_hourly.csv"),
                           parse_dates=["date"], dtype={"station_id": str}, low_memory=False)
-    hourly = finalize(hourly, "HOURLY")
+    hourly = finalize(hourly, "HOURLY", time_cols=["date", "hour_ending"])
     hourly.to_csv(os.path.join(OUT_DIR, "final_hourly.csv"), index=False)
     log(f"\nSaved -> {OUT_DIR}/final_hourly.csv ({len(hourly)} rows, {len(hourly.columns)} columns)")
 

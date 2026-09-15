@@ -2,6 +2,9 @@
 # code, for ordinary experimentation (turning a model on/off, changing a
 # hyperparameter, switching grain or feature set).
 #
+# random_forest, decision_tree, and ridge are built and enabled now.
+# svr/xgboost blocks get added here once their models/<name>.py files
+# exist.
 #
 # grain:         "daily" or "hourly"
 # feature_sets:  which feature_manifest.json feature sets to train+evaluate
@@ -12,10 +15,27 @@
 #                  - all             everything combined
 # split:         which split to evaluate on -- "val" while iterating,
 #                switch to "test" only once for the final reported numbers
+#
+# pipeline.stage: which stage(s) src/run_pipeline.py runs, in order:
+#     ingest | eda | preprocess | features | split | models
+#     (== 01_data_ingestion, 02_eda, 03_data_preprocessing,
+#         04_feature_engineering, 05_train_test_split, 06_run_models)
+#
+#   stage: all       run every stage 01 -> 06, wiping data/processed/
+#                    first so this run never mixes with a stale one
+#                    (the model_results/ log is left alone)
+#   stage: <name>    run just that one stage, reusing whatever's
+#                    already on disk from the previous stage -- e.g.
+#                    "models" to just retrain/re-evaluate once
+#                    everything through 05 is already built
+
+pipeline:
+  stage: models   # all | ingest | eda | preprocess | features | split | models
 
 grain: daily
 feature_sets:
   - exogenous
+  - autoregressive
   - all
 split: val
 
@@ -35,3 +55,14 @@ models:
       max_depth: 8
       min_samples_leaf: 5
       random_state: 42
+
+  ridge:
+    enabled: true
+    params:
+      alpha: 1.0
+      random_state: 42
+    # Diagnostic baseline, not a competitor for the final model choice
+    # -- see models/ridge.py docstring for why it's here: comparing it
+    # against the trees on "exogenous" tells you whether that feature
+    # set's negative R2 is a real lack-of-signal problem or a
+    # tree-overfitting problem.

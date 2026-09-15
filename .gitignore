@@ -1,6 +1,5 @@
 venv/
-C:\Users\hanaa\.vscode\traffic-emissions-sydney-ml-xai\data\raw\speed_zones\Speed_Zones.shp
 data/raw/speed_zones/
-
 data/processed/
-
+__pycache__/
+*.pyc

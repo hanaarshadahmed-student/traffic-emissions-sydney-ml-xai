@@ -18,9 +18,10 @@ To add a new model:
 Nothing in src/06_run_models.py needs to change.
 """
 
-from . import decision_tree, random_forest
+from . import decision_tree, random_forest, ridge
 
 REGISTRY = {
     random_forest.NAME: random_forest.build_model,
     decision_tree.NAME: decision_tree.build_model,
+    ridge.NAME: ridge.build_model,
 }

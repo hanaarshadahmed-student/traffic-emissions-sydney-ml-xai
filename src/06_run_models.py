@@ -39,7 +39,16 @@ DEFAULT_CONFIG_PATH = ROOT_DIR / "config" / "models_config.yaml"
 sys.path.insert(0, str(ROOT_DIR))
 
 from models import REGISTRY  # noqa: E402  (must follow the sys.path insert above)
-from model_utils import Timer, evaluate, load_split, save_result  # noqa: E402
+from model_utils import (  # noqa: E402
+    Timer,
+    evaluate,
+    evaluate_per_station,
+    fit_with_optional_weight,
+    load_split,
+    load_station_ids,
+    save_per_station,
+    save_result,
+)
 
 
 def load_config(config_path: Path) -> dict:
@@ -47,28 +56,38 @@ def load_config(config_path: Path) -> dict:
         return yaml.safe_load(f)
 
 
-def run_one(name: str, params: dict, grain: str, feature_set: str, split: str) -> dict:
+def run_one(name: str, params: dict, grain: str, feature_set: str, split: str) -> tuple[dict, "pd.DataFrame"]:
     if name not in REGISTRY:
         raise KeyError(
             f"'{name}' isn't registered in models/__init__.py. "
             f"Known models: {sorted(REGISTRY)}"
         )
-    X_train, y_train = load_split(grain, "train", feature_set)
+    X_train, y_train, w_train = load_split(grain, "train", feature_set, with_weight=True)
     X_eval, y_eval = load_split(grain, split, feature_set)
 
     model = REGISTRY[name](**params)
     with Timer() as t:
-        model.fit(X_train, y_train)
+        weighted = fit_with_optional_weight(model, X_train, y_train, w_train)
     y_pred = model.predict(X_eval)
 
     metrics = evaluate(y_eval, y_pred, train_seconds=t.seconds)
+    metrics["sample_weighted"] = weighted
     save_result(name, grain, feature_set, metrics, split=split)
-    return metrics
+
+    per_station = evaluate_per_station(y_eval, y_pred, load_station_ids(grain, split))
+    save_per_station(name, grain, feature_set, split, per_station)
+    return metrics, per_station
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
+    parser.add_argument(
+        "--worst-stations", type=int, default=3,
+        help="How many lowest-R2 stations to print per run (0 to disable). "
+             "Full breakdown is always saved to "
+             "data/processed/model_results/per_station/ regardless.",
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -82,13 +101,22 @@ def main():
             continue
         params = model_config.get("params") or {}
         for feature_set in feature_sets:
-            metrics = run_one(name, params, grain, feature_set, split)
+            metrics, per_station = run_one(name, params, grain, feature_set, split)
             ran_any = True
+            weight_tag = "w" if metrics["sample_weighted"] else " "
             print(
-                f"{name:14s} | {grain} | {feature_set:14s} | {split:5s} | "
+                f"{name:14s} | {grain} | {feature_set:14s} | {split:5s} | [{weight_tag}] "
                 f"RMSE={metrics['rmse']:.4f}  MAE={metrics['mae']:.4f}  "
                 f"R2={metrics['r2']:.4f}  ({metrics['train_seconds']}s)"
             )
+            if args.worst_stations > 0:
+                worst = per_station.dropna(subset=["r2"]).head(args.worst_stations)
+                if len(worst):
+                    tags = " | ".join(
+                        f"{row.station_id} n={row.n_rows} R2={row.r2:.2f}"
+                        for row in worst.itertuples()
+                    )
+                    print(f"{'':14s}   worst stations ({split}): {tags}")
 
     if not ran_any:
         print("No models enabled -- set enabled: true for at least one "
