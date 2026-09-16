@@ -28,18 +28,20 @@ config/
   models_config.yaml           Which models run, their hyperparameters, the
                                 grain/feature_set/split to evaluate on, and
                                 which pipeline stage(s) src/run_pipeline.py
-                                runs. random_forest and decision_tree are
-                                enabled so far.
+                                runs. random_forest, decision_tree, and ridge
+                                are enabled by default.
+  xgboost_baseline.yaml        Reproducible XGBoost validation baseline using
+                                the same daily data and feature sets.
+  xgboost_tuning.yaml          Daily/hourly XGBoost search space and settings.
 models/
   __init__.py                  Registry mapping a config model name to its
-                                build_model() function. random_forest and
-                                decision_tree are registered; svr.py,
-                                xgboost_model.py follow the same pattern
-                                once those are needed.
+                                build_model() function.
   random_forest.py             Defines ONLY the estimator (a few lines —
                                 NAME + build_model()). decision_tree.py,
-                                svr.py, xgboost_model.py follow the same
-                                pattern once this one is confirmed working.
+                                ridge.py, and xgboost_model.py follow the
+                                same pattern.
+  train_xgboost.py             Tunes XGBoost on daily/hourly tabular features,
+                                saves models, metrics, trials, and importances.
 notebooks/
   01_data_exploration.ipynb     EDA — the most current/complete notebook
   02_feature_engineering.ipynb  (not yet built)
@@ -84,7 +86,7 @@ src/
                                 (data/processed/model_results/results.json).
   06_run_models.py             Reads config/models_config.yaml, trains + evaluates
                                 every enabled model from models/, appends results.
-                                random_forest and decision_tree are wired up now.
+                                XGBoost can be run with xgboost_baseline.yaml.
   07_deep_learning_*.py        (not yet built) LSTM + GRU on the hourly grain
   08_hyperparameter_tuning.py  (not yet built)
   09_evaluation.py             (not yet built) Final RMSE/MAE/R² comparison table
@@ -197,16 +199,19 @@ python src/06_run_models.py
    `{grain}_scaler.joblib`, and `split_manifest.json`.
 6. **`06_run_models.py`** — reads `config/models_config.yaml` and trains +
    evaluates every enabled model from `models/`, appending results to
-   `data/processed/model_results/results.json`. `random_forest` and
-   `decision_tree` are built and enabled right now — expect one line of
-   output per model per feature set (`exogenous`, `all`).
+   `data/processed/model_results/results.json`. Run the XGBoost baseline
+   with `python src/06_run_models.py --config config/xgboost_baseline.yaml`.
+   Expect one line of output per feature set (`exogenous`,
+   `autoregressive`, `all`).
 
-`07`–`10` remain placeholders. A working prototype covering all four
-baseline models (decision tree, random forest, SVR, XGBoost) was built
-and verified end-to-end before being scoped back down to just
-random_forest — it's kept in `src/_archive/models_prototype/` for
-reference; the other three model files follow the exact same pattern as
-`models/random_forest.py` once this one's confirmed working.
+   Tune and train XGBoost across daily and hourly data with
+   `python models/train_xgboost.py`. This writes the best RMSE/MAE/R² results,
+   fitted models, trial history, and feature importance tables under
+   `data/processed/model_results/`.
+
+`07`–`10` remain placeholders. Decision tree, random forest, ridge, and
+XGBoost are implemented through the shared model registry. The earlier
+prototype remains in `src/_archive/models_prototype/` for reference.
 
 Each script prints a summary on completion (row counts, dropped stations,
 imputation coverage). Check this output before moving to the next step.
