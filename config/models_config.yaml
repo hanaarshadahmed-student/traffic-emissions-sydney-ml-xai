@@ -2,9 +2,9 @@
 # code, for ordinary experimentation (turning a model on/off, changing a
 # hyperparameter, switching grain or feature set).
 #
-# random_forest, decision_tree, and ridge are built and enabled now.
-# svr/xgboost blocks get added here once their models/<name>.py files
-# exist.
+# random_forest, decision_tree, and ridge are enabled by default.
+# xgboost is available here and has a dedicated baseline configuration
+# in config/xgboost_baseline.yaml.
 #
 # grain:         "daily" or "hourly"
 # feature_sets:  which feature_manifest.json feature sets to train+evaluate
@@ -66,3 +66,20 @@ models:
     # against the trees on "exogenous" tells you whether that feature
     # set's negative R2 is a real lack-of-signal problem or a
     # tree-overfitting problem.
+
+  xgboost:
+    enabled: false
+    params:
+      objective: reg:squarederror
+      n_estimators: 500
+      learning_rate: 0.03
+      max_depth: 4
+      min_child_weight: 5
+      subsample: 0.8
+      colsample_bytree: 0.8
+      reg_alpha: 0.0
+      reg_lambda: 1.0
+      tree_method: hist
+      eval_metric: rmse
+      n_jobs: -1
+      random_state: 42
