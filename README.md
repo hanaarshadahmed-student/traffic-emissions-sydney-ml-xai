@@ -33,6 +33,7 @@ config/
   xgboost_baseline.yaml        Reproducible XGBoost validation baseline using
                                 the same daily data and feature sets.
   xgboost_tuning.yaml          Daily/hourly XGBoost search space and settings.
+  svr_tuning.yaml              Daily SVR search space and validation settings.
 models/
   __init__.py                  Registry mapping a config model name to its
                                 build_model() function.
@@ -42,6 +43,8 @@ models/
                                 same pattern.
   train_xgboost.py             Tunes XGBoost on daily/hourly tabular features,
                                 saves models, metrics, trials, and importances.
+  svr_model.py                 Defines the Support Vector Regressor estimator.
+  train_svr.py                 Tunes SVR on the shared scaled daily features.
 notebooks/
   01_data_exploration.ipynb     EDA — the most current/complete notebook
   02_feature_engineering.ipynb  (not yet built)
@@ -209,8 +212,13 @@ python src/06_run_models.py
    fitted models, trial history, and feature importance tables under
    `data/processed/model_results/`.
 
-`07`–`10` remain placeholders. Decision tree, random forest, ridge, and
-XGBoost are implemented through the shared model registry. The earlier
+   Tune and train SVR on the same daily comparison data with
+   `python models/train_svr.py`. This writes the best RMSE/MAE/R² results,
+   fitted models, trial history, and per-station diagnostics under
+   `data/processed/model_results/`.
+
+`07`–`10` remain placeholders. Decision tree, random forest, ridge, SVR,
+and XGBoost are implemented through the shared model registry. The earlier
 prototype remains in `src/_archive/models_prototype/` for reference.
 
 Each script prints a summary on completion (row counts, dropped stations,
