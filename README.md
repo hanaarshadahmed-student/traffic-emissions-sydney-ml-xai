@@ -41,10 +41,14 @@ models/
                                 NAME + build_model()). decision_tree.py,
                                 ridge.py, and xgboost_model.py follow the
                                 same pattern.
-  train_xgboost.py             Tunes XGBoost on daily/hourly tabular features,
-                                saves models, metrics, trials, and importances.
   svr_model.py                 Defines the Support Vector Regressor estimator.
-  train_svr.py                 Tunes SVR on the shared scaled daily features.
+  fine_tuning/
+    common.py                  Shared random search and chronological learning
+                                curves, including per-station diagnostics.
+    train_xgboost.py           Tunes daily/hourly XGBoost with early stopping.
+    train_svr.py               Tunes SVR on the shared scaled daily features.
+  train_xgboost.py             Compatibility entry point for fine_tuning/.
+  train_svr.py                 Compatibility entry point for fine_tuning/.
 notebooks/
   01_data_exploration.ipynb     EDA — the most current/complete notebook
   02_feature_engineering.ipynb  (not yet built)
@@ -91,7 +95,7 @@ src/
                                 every enabled model from models/, appends results.
                                 XGBoost can be run with xgboost_baseline.yaml.
   07_deep_learning_*.py        (not yet built) LSTM + GRU on the hourly grain
-  08_hyperparameter_tuning.py  (not yet built)
+  08_hyperparameter_tuning.py  Implemented under models/fine_tuning/
   09_evaluation.py             (not yet built) Final RMSE/MAE/R² comparison table
 
                                 across every model in model_results/results.json
@@ -209,12 +213,14 @@ python src/06_run_models.py
 
    Tune and train XGBoost across daily and hourly data with
    `python models/train_xgboost.py`. This writes the best RMSE/MAE/R² results,
-   fitted models, trial history, and feature importance tables under
-   `data/processed/model_results/`.
+   fitted models, early-stopping details, L1/L2 and subsampling trials, feature
+   importance, train/validation overfitting diagnostics, and overall/per-station
+   learning curves under `data/processed/model_results/`.
 
    Tune and train SVR on the same daily comparison data with
    `python models/train_svr.py`. This writes the best RMSE/MAE/R² results,
-   fitted models, trial history, and per-station diagnostics under
+   fitted models, regularisation trials across C/epsilon/gamma, train/validation
+   overfitting diagnostics, and overall/per-station learning curves under
    `data/processed/model_results/`.
 
 `07`–`10` remain placeholders. Decision tree, random forest, ridge, SVR,
