@@ -1,0 +1,58 @@
+grains:
+  - daily
+
+feature_sets:
+  - exogenous
+  - autoregressive
+  - all
+
+split: val
+selection_metric: rmse
+n_trials: 12
+random_state: 42
+
+fixed_params:
+  cache_size: 2048
+  shrinking: true
+  tol: 0.001
+  max_iter: -1
+
+baseline_params:
+  kernel: rbf
+  C: 1.0
+  epsilon: 0.1
+  gamma: scale
+
+search_space:
+  - kernel:
+      - linear
+    C:
+      - 0.1
+      - 1.0
+      - 10.0
+      - 100.0
+    epsilon:
+      - 0.01
+      - 0.05
+      - 0.1
+      - 0.2
+    gamma:
+      - scale
+  - kernel:
+      - rbf
+    C:
+      - 0.1
+      - 1.0
+      - 10.0
+      - 100.0
+    epsilon:
+      - 0.01
+      - 0.05
+      - 0.1
+      - 0.2
+    gamma:
+      - scale
+      - auto
+      - 0.001
+      - 0.01
+      - 0.1

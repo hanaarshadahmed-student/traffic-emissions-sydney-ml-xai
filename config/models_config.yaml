@@ -3,8 +3,7 @@
 # hyperparameter, switching grain or feature set).
 #
 # random_forest, decision_tree, and ridge are enabled by default.
-# xgboost is available here and has a dedicated baseline configuration
-# in config/xgboost_baseline.yaml.
+# SVR and XGBoost are also available with dedicated tuning configurations.
 #
 # grain:         "daily" or "hourly"
 # feature_sets:  which feature_manifest.json feature sets to train+evaluate
@@ -83,3 +82,12 @@ models:
       eval_metric: rmse
       n_jobs: -1
       random_state: 42
+
+  svr:
+    enabled: false
+    params:
+      kernel: rbf
+      C: 1.0
+      epsilon: 0.1
+      gamma: scale
+      cache_size: 2048
