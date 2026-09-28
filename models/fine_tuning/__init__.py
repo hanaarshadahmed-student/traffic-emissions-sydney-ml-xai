@@ -1,1 +1,1 @@
-"""Model fine-tuning and overfitting package."""
+"""Shared fine-tuning tools for the tabular emission models."""
