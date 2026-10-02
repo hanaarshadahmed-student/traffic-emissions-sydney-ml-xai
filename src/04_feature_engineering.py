@@ -48,6 +48,14 @@ MANIFEST_OUTPUT = PROCESSED_DIR / "feature_manifest.json"
 
 TARGET_COLUMNS = ["no2_pphm", "target_no2_log1p", "target_no2_sqrt"]
 SAMPLE_WEIGHT_COLUMN = "aq_quality_weight"
+# Monotonic time-trend columns. Kept in the CSV for reference, but NOT
+# offered to models: val/test dates are always later than train, so these
+# take values a model has never seen, and tree models can't extrapolate --
+# random forest ranked days_since_start its #1 feature and its exogenous
+# test R2 collapsed to -11. (Grange & Carslaw's meteorological
+# normalisation uses a trend term deliberately, but for explaining the
+# past, not forecasting a later period.)
+TIME_TREND_COLUMNS = ["calendar_year", "days_since_start"]
 BASE_METADATA_COLUMNS = [
     "date",
     "timestamp",
@@ -744,7 +752,7 @@ def build_dataset(input_path: Path, output_path: Path, grain: str) -> pd.DataFra
 
 def feature_lists(df: pd.DataFrame) -> dict[str, list[str]]:
     metadata = [column for column in BASE_METADATA_COLUMNS if column in df.columns]
-    excluded = set(metadata + TARGET_COLUMNS + [SAMPLE_WEIGHT_COLUMN])
+    excluded = set(metadata + TARGET_COLUMNS + [SAMPLE_WEIGHT_COLUMN] + TIME_TREND_COLUMNS)
     all_features = [
         column
         for column in df.select_dtypes(include=[np.number, "bool"]).columns

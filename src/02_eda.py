@@ -19,7 +19,22 @@ Outputs: data/processed/preprocessed_daily.csv     (modeling-ready, all stations
 import pandas as pd
 import os
 
+import yaml
+
 OUT_DIR = "data/processed"
+STATION_EXCLUSIONS_PATH = "config/station_exclusions.yaml"
+
+
+def load_station_exclusions() -> dict:
+    """{station_id: reason} from config/station_exclusions.yaml, or {} if
+    the file is missing or `enabled: false` (the sensitivity run)."""
+    if not os.path.exists(STATION_EXCLUSIONS_PATH):
+        return {}
+    with open(STATION_EXCLUSIONS_PATH) as f:
+        cfg = yaml.safe_load(f) or {}
+    if not cfg.get("enabled", False):
+        return {}
+    return {str(k): v for k, v in (cfg.get("stations") or {}).items()}
 
 # Stations with fewer days of traffic data than this are flagged (not dropped)
 # as thin-coverage -- a judgement call, adjust and justify in your report.
@@ -50,6 +65,23 @@ def preprocess(df, label, min_days_col_scale=1):
     df = df[df["has_no2_coverage"]].copy()
     log(f"Step 1 -- dropped {len(no_coverage)} stations with no NO2 coverage "
         f"({no_coverage.tolist()}): {before - len(df)} rows removed, {len(df)} remain")
+
+    # ---- Step 1b: data-quality exclusions (config/station_exclusions.yaml) ----
+    exclusions = load_station_exclusions()
+    to_drop = [sid for sid in exclusions if sid in set(df["station_id"])]
+    for sid in to_drop:
+        excluded_records.append({
+            "station_id": sid, "reason": exclusions[sid],
+            "matched_aq_site": df.loc[df["station_id"] == sid, "matched_aq_site"].iloc[0],
+            "rows_dropped": int((df["station_id"] == sid).sum()),
+        })
+    before = len(df)
+    df = df[~df["station_id"].isin(to_drop)].copy()
+    if exclusions:
+        log(f"Step 1b -- dropped {len(to_drop)} station(s) per config/station_exclusions.yaml "
+            f"({to_drop}): {before - len(df)} rows removed, {len(df)} remain")
+    else:
+        log("Step 1b -- station exclusions DISABLED (sensitivity run): all stations kept")
 
     # ---- Step 2: sanity-check traffic volume ----
     bad_traffic = df["traffic_volume_total"] < 0
