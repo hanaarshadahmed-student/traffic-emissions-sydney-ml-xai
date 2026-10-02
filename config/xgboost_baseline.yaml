@@ -4,7 +4,7 @@
 pipeline:
   stage: models
 
-grain: daily
+grain: hourly
 feature_sets:
   - exogenous
   - autoregressive
