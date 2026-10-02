@@ -6,7 +6,9 @@ fits feature scaling -- the step between feature engineering and modeling.
 
 Two choices here matter more than they look:
 
-1. The split is CHRONOLOGICAL, not random, and done PER STATION. Random
+1. The split is CHRONOLOGICAL, not random, with ONE GLOBAL CUTOFF DATE
+   for every station (see split_utils.py for why it is no longer per
+   station -- stations sharing an AQ site leaked targets across splits). Random
    splitting would leak information: a test-set row's lag/rolling features
    are computed from timestamps that could land in the training set,
    letting the model implicitly see the future. Splitting per station
@@ -45,6 +47,7 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
 from split_utils import assign_chronological_split as _shared_assign_split
+from split_utils import split_cutoffs
 
 warnings.filterwarnings("ignore", message="DataFrame is highly fragmented")
 
@@ -57,12 +60,30 @@ GRAIN_CONFIG = {
     "daily": {
         "input": PROCESSED_DIR / "features_daily.csv",
         "date_col": "date",
+        # previous observed NO2 -> the persistence baseline
+        "persistence_source": "no2_pphm_lag_1d",
     },
     "hourly": {
         "input": PROCESSED_DIR / "features_hourly.csv",
         "date_col": "timestamp",
+        "persistence_source": "no2_pphm_lag_1h",
     },
 }
+
+# Feature pruning: within the exogenous set and within the autoregressive
+# set, drop a feature if it's correlated above this |r| (on TRAIN rows
+# only) with a feature already kept. Near-duplicates (traffic, log
+# traffic, sqrt traffic, ...) add nothing for the models and split SHAP
+# credit between them, which makes the XAI step misleading.
+PRUNE_THRESHOLD = 0.95
+
+# Name fragments that mark a feature as a derived variant of something
+# simpler. When two features are near-duplicates, the one with fewer of
+# these is kept -- so the raw, readable feature wins over its transforms.
+DERIVED_TOKENS = (
+    "log1p", "sqrt", "squared", "_x_", "ratio", "difference", "zscore",
+    "vs_prior", "proxy", "change", "share", "imbalance", "_available",
+)
 
 
 def load_manifest() -> dict:
@@ -100,13 +121,50 @@ def pick_scale_columns(df: pd.DataFrame, candidate_features: list[str]) -> list[
     return scale_cols
 
 
-def split_and_scale(grain: str, manifest: dict) -> dict:
+def _derived_score(name: str) -> int:
+    return sum(token in name for token in DERIVED_TOKENS)
+
+
+def prune_features(train_df: pd.DataFrame, features: list[str]) -> dict[str, str]:
+    """Returns {dropped_feature: reason}. Fit on TRAIN rows only."""
+    present = [f for f in features if f in train_df.columns]
+    dropped: dict[str, str] = {}
+    variable = []
+    for f in present:
+        if train_df[f].nunique(dropna=True) <= 1:
+            dropped[f] = "constant in train"
+        else:
+            variable.append(f)
+    corr = train_df[variable].astype(float).corr().abs()
+    order = sorted(variable, key=lambda f: (_derived_score(f), variable.index(f)))
+    kept: list[str] = []
+    for f in order:
+        twin = next((k for k in kept if corr.at[f, k] > PRUNE_THRESHOLD), None)
+        if twin is None:
+            kept.append(f)
+        else:
+            dropped[f] = f"|r|={corr.at[f, twin]:.3f} with kept '{twin}'"
+    return dropped
+
+
+def split_and_scale(grain: str, manifest: dict, prune: bool = True) -> dict:
     config = GRAIN_CONFIG[grain]
     date_col = config["date_col"]
     df = pd.read_csv(config["input"], dtype={"station_id": str}, low_memory=False)
     df[date_col] = pd.to_datetime(df[date_col])
 
     df["split"] = assign_chronological_split(df, date_col)
+    train_end, val_end = split_cutoffs(df, date_col)
+
+    # Unscaled copy of yesterday's / last hour's NO2 for the persistence
+    # baseline in 06_run_models.py. Not in the feature manifest, so no
+    # model ever trains on it.
+    persistence_col = config["persistence_source"]
+    if persistence_col in df.columns:
+        df["baseline_persistence"] = df[persistence_col]
+        available = f"{persistence_col}_available"
+        if available in df.columns:
+            df.loc[df[available] == 0, "baseline_persistence"] = np.nan
 
     grain_manifest = manifest[grain]
     candidate_features = grain_manifest["all_candidate_features"]
@@ -116,6 +174,11 @@ def split_and_scale(grain: str, manifest: dict) -> dict:
     train_df = df[df["split"] == "train"].copy()
     val_df = df[df["split"] == "val"].copy()
     test_df = df[df["split"] == "test"].copy()
+
+    excluded: dict[str, str] = {}
+    if prune:
+        for group in ("exogenous_features", "autoregressive_features"):
+            excluded.update(prune_features(train_df, grain_manifest[group]))
 
     scaler = StandardScaler()
     train_df[scale_cols] = scaler.fit_transform(train_df[scale_cols])
@@ -137,6 +200,10 @@ def split_and_scale(grain: str, manifest: dict) -> dict:
         }
 
     return {
+        "split_method": "global chronological cutoff (see split_utils.py)",
+        "train_end_exclusive": str(train_end),
+        "val_end_exclusive": str(val_end),
+        "excluded_features": excluded,
         "train": split_summary(train_df),
         "val": split_summary(val_df),
         "test": split_summary(test_df),
@@ -153,6 +220,8 @@ def split_and_scale(grain: str, manifest: dict) -> dict:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--grain", choices=["daily", "hourly", "all"], default="all")
+    parser.add_argument("--no-prune", action="store_true",
+                        help="Keep every manifest feature (skip near-duplicate pruning).")
     args = parser.parse_args()
 
     manifest = load_manifest()
@@ -160,7 +229,7 @@ def main():
 
     split_manifest = {}
     for grain in grains:
-        summary = split_and_scale(grain, manifest)
+        summary = split_and_scale(grain, manifest, prune=not args.no_prune)
         split_manifest[grain] = summary
         train, val, test = summary["train"], summary["val"], summary["test"]
         print(
@@ -168,6 +237,16 @@ def main():
             f"val {val['rows']:,} rows ({val['date_min']} to {val['date_max']}), "
             f"test {test['rows']:,} rows ({test['date_min']} to {test['date_max']}) "
             f"-> {grain}_train.csv / {grain}_val.csv / {grain}_test.csv"
+        )
+        print(
+            f"       cutoffs: train < {summary['train_end_exclusive'][:10]} <= val < "
+            f"{summary['val_end_exclusive'][:10]} <= test"
+        )
+        n_ex = len(summary["exogenous_features"]) - sum(f in summary["excluded_features"] for f in summary["exogenous_features"])
+        n_ar = len(summary["autoregressive_features"]) - sum(f in summary["excluded_features"] for f in summary["autoregressive_features"])
+        print(
+            f"       pruned {len(summary['excluded_features'])} near-duplicate/constant features "
+            f"-> {n_ex} exogenous + {n_ar} autoregressive kept (list in split_manifest.json)"
         )
         print(
             f"       {len(summary['scaled_features'])} scaled features, "

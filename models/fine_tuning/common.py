@@ -12,7 +12,14 @@ import pandas as pd
 import yaml
 from sklearn.model_selection import ParameterSampler
 
-from src.model_utils import evaluate, evaluate_per_station
+from src.model_utils import (
+    evaluate,
+    evaluate_per_station,
+    load_split,
+    load_station_ids,
+    save_per_station,
+    save_result,
+)
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 RESULTS_DIR = ROOT_DIR / "data" / "processed" / "model_results"
@@ -322,3 +329,28 @@ def build_learning_curves(
         "learning_curve_plot": str(overall_plot.relative_to(ROOT_DIR)),
         "station_learning_curve_plot": str(station_plot.relative_to(ROOT_DIR)),
     }
+
+
+def save_train_and_test_results(model_name: str, model, grain: str, feature_set: str, metrics: dict) -> dict:
+    """After the best candidate has been picked ON VALIDATION ONLY, record
+    the same tuned model's train and test scores as their own results.json
+    rows (split="train" / split="test", stage="tuned"), so 07_evaluation.py
+    can show train / val / test side by side for every model.
+
+    The test split plays no part in choosing hyperparameters -- it's only
+    scored here, once the choice is already made."""
+    save_result(
+        model_name, grain, feature_set,
+        {"rmse": metrics["train_rmse"], "mae": metrics["train_mae"], "r2": metrics["train_r2"]},
+        split="train", stage="tuned",
+    )
+    X_test, y_test = load_split(grain, "test", feature_set)
+    test_predictions = model.predict(X_test)
+    test_metrics = evaluate(y_test, test_predictions)
+    save_result(model_name, grain, feature_set, test_metrics, split="test", stage="tuned")
+    save_per_station(
+        model_name, grain, feature_set, "test",
+        evaluate_per_station(y_test, test_predictions, load_station_ids(grain, "test")),
+        stage="tuned",
+    )
+    return {f"test_{k}": v for k, v in test_metrics.items()}

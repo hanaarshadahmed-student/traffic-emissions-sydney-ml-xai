@@ -131,12 +131,40 @@ filling, so a model can distinguish "no wind sensor" from "average wind."
 filled with the median. `temp_max_c`/`temp_min_c` and `co_ppm`/
 `ozone_pphm` are dropped as redundant/unused rather than imputed.
 
-**Known limitation:** the median values used above are computed across
-the *entire* dataset. If a chronological train/test split is used in
-`05_models.py`, this technically leaks test-period information into the
-fill value used for training rows. Not yet fixed — requires the split
-boundary to be chosen first (compute the median on train rows only,
-apply the same value to test).
+**Imputation leakage (fixed):** the medians above are computed on TRAIN
+rows only, using the same split definition as `05_train_test_split.py`
+(`split_utils.py`).
+
+## Train/val/test split and leakage fixes
+
+**Global cutoff date.** One cutoff date applies to every station (daily:
+train < 2025-03-29 <= val < 2025-08-15 <= test). The earlier per-station
+70/15/15 split leaked targets: stations sharing an AQ site (NEWCASTLE
+7212/7211, WOLLONGONG 7216/6178-PR, GOULBURN 6109/6135-PR, PORT MACQUARIE
+6124/6119-PR) have an identical NO2 series, and short stations' val/test
+dates fell inside their sibling's training period (78-100% of those rows).
+Consequence: the 2024-only stations (7211, 6135-PR, 6178-PR), 10011 and
+6109 are entirely in train; val/test evaluate the 6 long-running stations.
+
+**Time-trend features removed.** `days_since_start` and `calendar_year` are
+still in the feature CSVs but excluded from the model feature lists. Val/test
+dates always lie beyond the training range, trees can't extrapolate, and
+random forest had ranked `days_since_start` its #1 feature (exogenous test
+R2 -11.3 with it, -0.27 without).
+
+**Near-duplicate features pruned.** `05_train_test_split.py` drops features
+correlated |r| > 0.95 (on train rows) with a simpler kept feature, within
+the exogenous and autoregressive sets separately; every dropped feature
+and its reason is in `splits/split_manifest.json`. Use `--no-prune` to skip.
+
+**Shared AQ sites (limitation).** For the four station pairs above, two
+different roads are predicting the same monitor's NO2 -- the model is
+learning the AQ site's NO2, not each road's. State this in the report.
+
+**100001 weighting (fixed).** `100001` was flagged `REVIEW` only because the
+registry labels its site "LIVERPOOL SWAQS" rather than "LIVERPOOL" (0.2km
+apart, same site), which down-weighted it to 0.5. The match check now
+accepts label variants, so only `MUB001` and `6119-PR` are weighted 0.5.
 
 ## Final processed dataset
 

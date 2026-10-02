@@ -10,6 +10,8 @@ feature_sets:
   - autoregressive
   - all
 split: val
+report_splits: [train, val, test]
+baselines: false   # already written by models_config.yaml runs
 
 models:
   xgboost:

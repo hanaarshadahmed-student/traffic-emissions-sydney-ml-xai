@@ -3,3 +3,4 @@ data/raw/speed_zones/
 data/processed/
 __pycache__/
 *.pyc
+data/raw.zip

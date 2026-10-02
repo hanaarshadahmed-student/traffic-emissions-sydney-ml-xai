@@ -37,6 +37,8 @@ feature_sets:
   - autoregressive
   - all
 split: val
+report_splits: [train, val, test]   # every split each fitted model is scored on
+baselines: true   # also score naive persistence + seasonal-climatology baselines
 
 models:
   random_forest:

@@ -121,6 +121,17 @@ def _haversine_km(lat1, lon1, lat2, lon2):
     return 2 * R * math.asin(math.sqrt(a))
 
 
+def _same_aq_site(hardcoded: str, nearest: str) -> bool:
+    """True if the registry's nearest site is the hardcoded site, allowing
+    for registry label variants -- e.g. hardcoded "LIVERPOOL" vs registry
+    "LIVERPOOL SWAQS" (0.2km apart, same physical site). The old check only
+    tested nearest-in-hardcoded, so that pair was wrongly flagged REVIEW
+    and station 100001 was down-weighted to 0.5 in training."""
+    hard = hardcoded.upper().split(" (")[0].strip()
+    near = nearest.upper().strip()
+    return near in hard or hard in near
+
+
 def verify_aq_site_matches(stations, sites_path=AQ_SITES_PATH):
     """Cross-check each station's hardcoded aq_site/aq_distance_km against
     the true nearest geocoded AQ site (haversine). Does NOT correct
@@ -148,7 +159,7 @@ def verify_aq_site_matches(stations, sites_path=AQ_SITES_PATH):
             "hardcoded_km": cfg["aq_distance_km"],
             "computed_nearest_site": nearest_name,
             "computed_nearest_km": round(nearest_km, 1),
-            "flag": "REVIEW" if nearest_name.upper() not in cfg["aq_site"].upper() else "OK",
+            "flag": "OK" if _same_aq_site(cfg["aq_site"], nearest_name) else "REVIEW",
         })
     df = pd.DataFrame(rows)
 

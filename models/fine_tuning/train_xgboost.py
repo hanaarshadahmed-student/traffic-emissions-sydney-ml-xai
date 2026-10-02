@@ -22,6 +22,7 @@ from models.fine_tuning.common import (  # noqa: E402
     evaluate_generalization,
     load_config,
     save_overfitting_diagnostics,
+    save_train_and_test_results,
 )
 from models.xgboost_model import build_model  # noqa: E402
 from src.model_utils import (  # noqa: E402
@@ -109,7 +110,7 @@ def save_model_outputs(
         predictions,
         load_station_ids(grain, split),
     )
-    save_per_station("xgboost", grain, feature_set, split, per_station)
+    save_per_station("xgboost", grain, feature_set, split, per_station, stage="tuned")
 
     result_metrics = {
         **metrics,
@@ -121,7 +122,8 @@ def save_model_outputs(
         "best_params": model_params,
         **learning_curve_paths,
     }
-    save_result("xgboost", grain, feature_set, result_metrics, split=split)
+    save_result("xgboost", grain, feature_set, result_metrics, split=split, stage="tuned")
+    test_metrics = save_train_and_test_results("xgboost", model, grain, feature_set, metrics)
 
     return {
         "model": "xgboost",
@@ -134,6 +136,7 @@ def save_model_outputs(
         "rmse": metrics["rmse"],
         "mae": metrics["mae"],
         "r2": metrics["r2"],
+        **test_metrics,
         "train_rmse": metrics["train_rmse"],
         "train_mae": metrics["train_mae"],
         "train_r2": metrics["train_r2"],

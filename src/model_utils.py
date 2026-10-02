@@ -60,13 +60,24 @@ def get_feature_columns(grain: str, feature_set: str = "exogenous") -> list[str]
     """
     manifest = load_manifest()[grain]
     if feature_set == "exogenous":
-        return manifest["exogenous_features"]
+        features = manifest["exogenous_features"]
     elif feature_set == "autoregressive":
-        return manifest["autoregressive_features"]
+        features = manifest["autoregressive_features"]
     elif feature_set == "all":
-        return manifest["all_candidate_features"]
+        features = manifest["all_candidate_features"]
     else:
         raise ValueError(f"Unknown feature_set: {feature_set!r}")
+    # Drop the near-duplicate / constant features 05_train_test_split.py
+    # pruned on train rows (listed with reasons in split_manifest.json).
+    excluded = load_excluded_features(grain)
+    return [f for f in features if f not in excluded]
+
+
+def load_excluded_features(grain: str) -> set[str]:
+    if not SPLIT_MANIFEST_PATH.exists():
+        return set()
+    with open(SPLIT_MANIFEST_PATH) as f:
+        return set(json.load(f).get(grain, {}).get("excluded_features", {}))
 
 
 def load_split(
@@ -169,7 +180,8 @@ def evaluate_per_station(y_true, y_pred, station_ids: pd.Series) -> pd.DataFrame
 
 
 def save_per_station(
-    model_name: str, grain: str, feature_set: str, split: str, per_station: pd.DataFrame
+    model_name: str, grain: str, feature_set: str, split: str, per_station: pd.DataFrame,
+    stage: str = "baseline",
 ) -> Path:
     """Writes one run's per-station breakdown to its own CSV (one file
     per model/grain/feature_set/split, overwritten on rerun) alongside
@@ -177,7 +189,7 @@ def save_per_station(
     stations are driving a low aggregate score."""
     out_dir = RESULTS_DIR / "per_station"
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"{model_name}_{grain}_{feature_set}_{split}.csv"
+    path = out_dir / f"{model_name}_{stage}_{grain}_{feature_set}_{split}.csv"
     per_station.to_csv(path, index=False)
     return path
 
@@ -195,10 +207,27 @@ def evaluate(y_true, y_pred, train_seconds: float | None = None) -> dict:
     return metrics
 
 
-def save_result(model_name: str, grain: str, feature_set: str, metrics: dict, split: str = "val") -> Path:
-    """Appends one run's metrics to data/processed/model_results/results.json
-    so 09_evaluation.py can build the final comparison table across
-    everyone's models without agreeing on a shared spreadsheet by hand."""
+def _row_stage(row: dict) -> str:
+    """Stage of a results.json row. Rows written before the `stage` column
+    existed are inferred: the fine-tuning scripts always set tuned=True."""
+    return row.get("stage") or ("tuned" if row.get("tuned") else "baseline")
+
+
+def save_result(
+    model_name: str,
+    grain: str,
+    feature_set: str,
+    metrics: dict,
+    split: str = "val",
+    stage: str = "baseline",
+) -> Path:
+    """Upserts one run's metrics into data/processed/model_results/results.json,
+    keyed on (model, stage, grain, feature_set, split).
+
+    `stage` separates a model's untuned baseline run (06_run_models.py)
+    from its tuned run (models/fine_tuning/*), so tuning XGBoost no longer
+    overwrites the XGBoost baseline row -- both are kept, and
+    07_evaluation.py shows them side by side."""
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     results_path = RESULTS_DIR / "results.json"
     results = json.loads(results_path.read_text()) if results_path.exists() else []
@@ -207,6 +236,7 @@ def save_result(model_name: str, grain: str, feature_set: str, metrics: dict, sp
         for r in results
         if not (
             r["model"] == model_name
+            and _row_stage(r) == stage
             and r["grain"] == grain
             and r["feature_set"] == feature_set
             and r["split"] == split
@@ -215,13 +245,14 @@ def save_result(model_name: str, grain: str, feature_set: str, metrics: dict, sp
     results.append(
         {
             "model": model_name,
+            "stage": stage,
             "grain": grain,
             "feature_set": feature_set,
             "split": split,
             **metrics,
         }
     )
-    results_path.write_text(json.dumps(results, indent=2))
+    results_path.write_text(json.dumps(results, indent=2, default=str))
     return results_path
 
 

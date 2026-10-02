@@ -78,7 +78,7 @@ src/
                                 row-dropping), weather physics, target transforms.
                                 Writes feature_manifest.json listing exogenous vs.
                                 autoregressive features per grain.
-  05_train_test_split.py       Chronological, per-station 70:15:15 train/val/test split
+  05_train_test_split.py       Chronological 70:15:15 train/val/test split (one global cutoff date)
                                 + feature scaling (fit on train only). Writes
                                 data/processed/splits/{grain}_{train,val,test}.csv,
                                 {grain}_scaler.joblib, and split_manifest.json.
@@ -200,8 +200,10 @@ python src/06_run_models.py
    per grain — useful for choosing what a model is allowed to see).
 
 5. **`05_train_test_split.py`** — splits each grain into train/val/test
-   **chronologically, per station** (not randomly — see the script's
-   docstring for why), and fits feature scaling on the train split only.
+   **chronologically with one global cutoff date** (not randomly, and not
+   per station — see `split_utils.py` and `doc/Data.md` for the leakage
+   this avoids), prunes near-duplicate features on train rows only, and
+   fits feature scaling on the train split only.
    Outputs `data/processed/splits/{grain}_{train,val,test}.csv`,
    `{grain}_scaler.joblib`, and `split_manifest.json`.
 6. **`06_run_models.py`** — reads `config/models_config.yaml` and trains +
@@ -223,7 +225,14 @@ python src/06_run_models.py
    overfitting diagnostics, and overall/per-station learning curves under
    `data/processed/model_results/`.
 
-`07`–`10` remain placeholders. Decision tree, random forest, ridge, SVR,
+7. **`07_evaluation.py`** — reads `results.json` (no retraining) and prints
+   every model's RMSE / MAE / R² on **train, val and test**, for its baseline
+   and tuned stage, per grain and feature set, plus train-val and val-test
+   R² gaps and a baseline → tuned delta table. Saves CSVs and plots to
+   `data/processed/model_results/evaluation/`. Add `--trials` to see every
+   XGBoost/SVR tuning candidate.
+
+`08`–`10` remain placeholders. Decision tree, random forest, ridge, SVR,
 and XGBoost are implemented through the shared model registry. The earlier
 prototype remains in `src/_archive/models_prototype/` for reference.
 
