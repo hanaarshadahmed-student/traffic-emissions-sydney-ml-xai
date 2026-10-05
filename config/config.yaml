@@ -1,0 +1,118 @@
+# Main project config -- edit this file, not the code, for ordinary
+# experimentation. Then run:   python run_pipeline.py
+#
+# Search spaces for hyperparameter tuning live in config/tuning.yaml.
+
+# ---------------------------------------------------------------------------
+# pipeline -- which stage(s) run_pipeline.py runs
+# ---------------------------------------------------------------------------
+#   all         every stage in order: ingest -> clean -> preprocess ->
+#               features -> split -> train -> (tune) -> evaluate.
+#               Empties data/processed/ first so a run never mixes with a
+#               stale one. results/ is kept (results.json is a cross-run log).
+#   <stage>     just that one stage, reusing what's already on disk:
+#               ingest | clean | preprocess | features | split | train | tune | evaluate
+#
+# `--stage <name>` on the command line overrides this for a one-off.
+pipeline:
+  stage: all
+  run_tuning: false   # true = `stage: all` also runs the (slow) tune stage
+
+# ---------------------------------------------------------------------------
+# data -- station exclusions applied in 02_data_cleaning.py
+# ---------------------------------------------------------------------------
+# MAIN ANALYSIS:        enabled: true   (the stations below are left out)
+# SENSITIVITY ANALYSIS: enabled: false  (everything kept) -- re-run
+#                       `python run_pipeline.py --stage all` and compare,
+#                       to show the conclusions don't hinge on this choice.
+#
+# Rule (applied to every AQ site, stated in the report): an AQ site is
+# excluded if its same-quarter NO2 mean changes more than 3-fold
+# year-on-year with no corresponding change in traffic at the matched
+# stations -- i.e. the target is not reflecting traffic emissions.
+# Only PORT MACQUARIE meets it (NO2 ~8x higher in Q1 2025 than Q1 2024,
+# ~5.6x in Q2, back down by Q4 2025; traffic flat). Supporting reasons:
+# the monitor is 37 km / 87 km from these stations, far beyond the
+# ~160-570 m over which traffic NO2 decays to background (Karner,
+# Eisinger & Niemeier 2010). This rule was set after inspecting the
+# data, which is why the sensitivity analysis is reported alongside.
+data:
+  station_exclusions:
+    enabled: true
+    stations:
+      "6124": "PORT MACQUARIE AQ site: >3x year-on-year NO2 shift unrelated to traffic; 36.9 km from monitor"
+      "6119-PR": "PORT MACQUARIE AQ site: >3x year-on-year NO2 shift unrelated to traffic; 87.3 km from monitor"
+
+# ---------------------------------------------------------------------------
+# training -- what 06_train_models.py trains and how it's scored
+# ---------------------------------------------------------------------------
+# grain:          "daily" or "hourly"
+# feature_sets:   which feature_manifest.json feature sets to train on,
+#                 one run each:
+#                   exogenous       traffic/weather/calendar/road/station
+#                                   only (no NO2 history)
+#                   autoregressive  only NO2's own lag/rolling features
+#                   all             everything combined
+# split:          the split used for choosing between models -- keep "val"
+#                 while iterating; test is reported, never tuned on
+# report_splits:  every split each fitted model is scored on
+# baselines:      also score naive persistence + seasonal-climatology
+# models:         names must match src/models.py; enabled: false skips one
+training:
+  grain: hourly
+  feature_sets:
+    - exogenous
+    - autoregressive
+    - all
+  split: val
+  report_splits: [train, val, test]
+  baselines: true
+
+  models:
+    random_forest:
+      enabled: true
+      params:
+        n_estimators: 300
+        max_depth: null
+        min_samples_leaf: 5
+        n_jobs: -1
+        random_state: 42
+
+    decision_tree:
+      enabled: true
+      params:
+        max_depth: 8
+        min_samples_leaf: 5
+        random_state: 42
+
+    ridge:
+      enabled: true   # diagnostic baseline -- see src/models.py
+      params:
+        alpha: 1.0
+        random_state: 42
+
+    xgboost:
+      enabled: false
+      params:
+        objective: reg:squarederror
+        n_estimators: 500
+        learning_rate: 0.03
+        max_depth: 4
+        min_child_weight: 5
+        subsample: 0.8
+        colsample_bytree: 0.8
+        reg_alpha: 0.0
+        reg_lambda: 1.0
+        tree_method: hist
+        eval_metric: rmse
+        n_jobs: -1
+        random_state: 42
+
+    svr:
+      enabled: false   # very slow on the hourly grain (~66k rows)
+      params:
+        kernel: rbf
+        C: 1.0
+        epsilon: 0.1
+        gamma: scale
+        cache_size: 2048

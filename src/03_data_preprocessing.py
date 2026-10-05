@@ -11,7 +11,7 @@ Output: data/processed/final_daily.csv      (zero NaNs in raw columns,
 import pandas as pd
 import os
 
-from split_utils import train_only_median
+from model_fixed.split_utils import train_only_median
 
 IN_DIR = "data/processed"
 OUT_DIR = "data/processed"

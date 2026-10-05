@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
-from models.fine_tuning.train_svr import main
+from scripts.models.fine_tuning.train_svr import main
 
 
 if __name__ == "__main__":

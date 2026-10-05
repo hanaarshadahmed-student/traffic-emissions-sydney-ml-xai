@@ -15,7 +15,7 @@ DEFAULT_CONFIG_PATH = ROOT_DIR / "config" / "xgboost_tuning.yaml"
 
 sys.path.insert(0, str(ROOT_DIR))
 
-from models.fine_tuning.common import (  # noqa: E402
+from scripts.models.fine_tuning.common import (  # noqa: E402
     RESULTS_DIR,
     build_candidates,
     build_learning_curves,
@@ -24,8 +24,8 @@ from models.fine_tuning.common import (  # noqa: E402
     save_overfitting_diagnostics,
     save_train_and_test_results,
 )
-from models.xgboost_model import build_model  # noqa: E402
-from src.model_utils import (  # noqa: E402
+from scripts.models.xgboost_model import build_model  # noqa: E402
+from model_fixed.model_utils import (  # noqa: E402
     Timer,
     evaluate_per_station,
     load_split,

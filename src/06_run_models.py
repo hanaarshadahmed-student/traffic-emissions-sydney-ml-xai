@@ -39,11 +39,11 @@ DEFAULT_CONFIG_PATH = ROOT_DIR / "config" / "models_config.yaml"
 # it isn't on sys.path by default the way this script's own directory is.
 sys.path.insert(0, str(ROOT_DIR))
 
-from models import REGISTRY  # noqa: E402  (must follow the sys.path insert above)
+from scripts.models import REGISTRY  # noqa: E402  (must follow the sys.path insert above)
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from model_utils import (  # noqa: E402
+from model_fixed.model_utils import (  # noqa: E402
     SPLITS_DIR,
     Timer,
     evaluate,

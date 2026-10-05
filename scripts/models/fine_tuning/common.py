@@ -12,7 +12,7 @@ import pandas as pd
 import yaml
 from sklearn.model_selection import ParameterSampler
 
-from src.model_utils import (
+from model_fixed.model_utils import (
     evaluate,
     evaluate_per_station,
     load_split,

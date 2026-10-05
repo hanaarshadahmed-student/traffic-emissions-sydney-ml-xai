@@ -46,8 +46,8 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
-from split_utils import assign_chronological_split as _shared_assign_split
-from split_utils import split_cutoffs
+from model_fixed.split_utils import assign_chronological_split as _shared_assign_split
+from model_fixed.split_utils import split_cutoffs
 
 warnings.filterwarnings("ignore", message="DataFrame is highly fragmented")
 

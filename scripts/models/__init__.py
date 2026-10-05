@@ -17,7 +17,7 @@ To add a new model:
 Nothing in src/06_run_models.py needs to change.
 """
 
-from . import decision_tree, random_forest, ridge, svr_model, xgboost_model
+from ...models import decision_tree, random_forest, ridge, svr_model, xgboost_model
 
 REGISTRY = {
     random_forest.NAME: random_forest.build_model,
