@@ -11,10 +11,9 @@ Two choices here matter more than they look:
    station -- stations sharing an AQ site leaked targets across splits). Random
    splitting would leak information: a test-set row's lag/rolling features
    are computed from timestamps that could land in the training set,
-   letting the model implicitly see the future. Splitting per station
-   (rather than by a single global cutoff date) keeps every station
-   represented in train/val/test even though stations have different
-   date ranges (see doc/Data.md).
+   letting the model implicitly see the future. A consequence of the
+   global cutoff: stations whose data ends early sit entirely in train,
+   so val/test evaluate the long-running stations (see docs/Data.md).
 
 2. The scaler is fit on the TRAIN split ONLY, then applied unchanged to
    val/test. Fitting on the full dataset first would leak test-set
@@ -46,15 +45,21 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
-from model_fixed.split_utils import assign_chronological_split as _shared_assign_split
-from model_fixed.split_utils import split_cutoffs
+import sys
+
+# Repo root on the import path, so the shared code in scripts/ is importable
+# whichever folder you run this from.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts import paths  # noqa: E402
+from scripts.split_utils import assign_chronological_split as _shared_assign_split  # noqa: E402
+from scripts.split_utils import split_cutoffs  # noqa: E402
 
 warnings.filterwarnings("ignore", message="DataFrame is highly fragmented")
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
-PROCESSED_DIR = ROOT_DIR / "data" / "processed"
-SPLITS_DIR = PROCESSED_DIR / "splits"
-MANIFEST_PATH = PROCESSED_DIR / "feature_manifest.json"
+PROCESSED_DIR = paths.PROCESSED_DIR
+SPLITS_DIR = paths.SPLITS_DIR
+MANIFEST_PATH = paths.FEATURE_MANIFEST_PATH
 
 GRAIN_CONFIG = {
     "daily": {

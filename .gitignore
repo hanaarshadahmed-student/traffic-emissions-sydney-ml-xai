@@ -1,6 +1,13 @@
+# environment
 venv/
-data/raw/speed_zones/
-data/processed/
 __pycache__/
 *.pyc
+.ipynb_checkpoints/
+
+# data -- raw speed zones are too big for GitHub; processed is rebuilt by the pipeline
+data/raw/speed_zones/
 data/raw.zip
+data/processed/
+
+# fitted model files can be large; everything else in results/ is tracked
+results/saved_models/

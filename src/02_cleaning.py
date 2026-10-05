@@ -1,37 +1,55 @@
 """
-CO2/NO2 Traffic-Emissions Capstone — Combing all our data for eda
-============================================================
-Takes both raw combined datasets from 01_data_ingestion.py and makes the
-deliberate cleaning decisions needed before feature engineering / EDA.
-Runs the same cleaning logic on both resolutions.
+CO2/NO2 Traffic-Emissions Capstone -- Stage 02: Data cleaning
+=============================================================
+Takes both combined datasets from 01_data_ingestion.py and makes the
+deliberate row/station-level cleaning decisions needed before
+preprocessing and feature engineering. Runs the same logic on both
+resolutions. (Exploratory analysis itself lives in
+notebooks/01_data_exploration.ipynb.)
 
 Every decision here is logged and printed so it can be explained/cited
 in the report -- nothing is silently dropped.
 
+Station exclusions (Step 1b) come from `data.station_exclusions` in
+config/config.yaml.
+
 Inputs:  data/processed/final_combined_dataset_daily.csv
          data/processed/final_combined_dataset_hourly.csv
-Outputs: data/processed/preprocessed_daily.csv     (modeling-ready, all stations)
-         data/processed/preprocessed_hourly.csv    (modeling-ready, metro-only stations)
+Outputs: data/processed/preprocessed_daily.csv     (all stations with NO2)
+         data/processed/preprocessed_hourly.csv    (metro-only stations)
          data/processed/excluded_stations_log_daily.csv
          data/processed/excluded_stations_log_hourly.csv
+
+Usage:
+    python src/02_cleaning.py
+    python src/02_cleaning.py --config config/my_experiment.yaml
 """
 
-import pandas as pd
+import argparse
 import os
 
+import pandas as pd
 import yaml
 
-OUT_DIR = "data/processed"
-STATION_EXCLUSIONS_PATH = "config/station_exclusions.yaml"
+import sys
+from pathlib import Path
+
+# Repo root on the import path, so the shared code in scripts/ is importable
+# whichever folder you run this from.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts import paths  # noqa: E402
+
+OUT_DIR = str(paths.PROCESSED_DIR)
 
 
-def load_station_exclusions() -> dict:
-    """{station_id: reason} from config/station_exclusions.yaml, or {} if
-    the file is missing or `enabled: false` (the sensitivity run)."""
-    if not os.path.exists(STATION_EXCLUSIONS_PATH):
+def load_station_exclusions(config_path=paths.CONFIG_PATH) -> dict:
+    """{station_id: reason} from data.station_exclusions in config.yaml,
+    or {} if it's missing or `enabled: false` (the sensitivity run)."""
+    if not os.path.exists(config_path):
         return {}
-    with open(STATION_EXCLUSIONS_PATH) as f:
-        cfg = yaml.safe_load(f) or {}
+    with open(config_path) as f:
+        cfg = (yaml.safe_load(f) or {}).get("data", {}).get("station_exclusions") or {}
     if not cfg.get("enabled", False):
         return {}
     return {str(k): v for k, v in (cfg.get("stations") or {}).items()}
@@ -45,7 +63,7 @@ def log(msg):
     print(msg)
 
 
-def preprocess(df, label, min_days_col_scale=1):
+def preprocess(df, label, min_days_col_scale=1, exclusions=None):
     """Shared cleaning logic. min_days_col_scale=24 for hourly data, since
     'days of coverage' there means station-hours / 24."""
     excluded_records = []
@@ -66,8 +84,8 @@ def preprocess(df, label, min_days_col_scale=1):
     log(f"Step 1 -- dropped {len(no_coverage)} stations with no NO2 coverage "
         f"({no_coverage.tolist()}): {before - len(df)} rows removed, {len(df)} remain")
 
-    # ---- Step 1b: data-quality exclusions (config/station_exclusions.yaml) ----
-    exclusions = load_station_exclusions()
+    # ---- Step 1b: data-quality exclusions (config.yaml: data.station_exclusions) ----
+    exclusions = exclusions or {}
     to_drop = [sid for sid in exclusions if sid in set(df["station_id"])]
     for sid in to_drop:
         excluded_records.append({
@@ -78,7 +96,7 @@ def preprocess(df, label, min_days_col_scale=1):
     before = len(df)
     df = df[~df["station_id"].isin(to_drop)].copy()
     if exclusions:
-        log(f"Step 1b -- dropped {len(to_drop)} station(s) per config/station_exclusions.yaml "
+        log(f"Step 1b -- dropped {len(to_drop)} station(s) per config.yaml data.station_exclusions "
             f"({to_drop}): {before - len(df)} rows removed, {len(df)} remain")
     else:
         log("Step 1b -- station exclusions DISABLED (sensitivity run): all stations kept")
@@ -137,19 +155,20 @@ def preprocess(df, label, min_days_col_scale=1):
     return df_clean, pd.DataFrame(excluded_records)
 
 
-def run():
+def run(config_path=paths.CONFIG_PATH):
     os.makedirs(OUT_DIR, exist_ok=True)
+    exclusions = load_station_exclusions(config_path)
 
     daily_raw = pd.read_csv(os.path.join(OUT_DIR, "final_combined_dataset_daily.csv"),
                              parse_dates=["date"], dtype={"station_id": str}, low_memory=False)
-    daily_clean, daily_excluded = preprocess(daily_raw, "DAILY", min_days_col_scale=1)
+    daily_clean, daily_excluded = preprocess(daily_raw, "DAILY", min_days_col_scale=1, exclusions=exclusions)
     daily_clean.to_csv(os.path.join(OUT_DIR, "preprocessed_daily.csv"), index=False)
     daily_excluded.to_csv(os.path.join(OUT_DIR, "excluded_stations_log_daily.csv"), index=False)
     log(f"\nSaved -> {OUT_DIR}/preprocessed_daily.csv ({len(daily_clean)} rows)")
 
     hourly_raw = pd.read_csv(os.path.join(OUT_DIR, "final_combined_dataset_hourly.csv"),
                               parse_dates=["date"], dtype={"station_id": str}, low_memory=False)
-    hourly_clean, hourly_excluded = preprocess(hourly_raw, "HOURLY", min_days_col_scale=24)
+    hourly_clean, hourly_excluded = preprocess(hourly_raw, "HOURLY", min_days_col_scale=24, exclusions=exclusions)
     hourly_clean.to_csv(os.path.join(OUT_DIR, "preprocessed_hourly.csv"), index=False)
     hourly_excluded.to_csv(os.path.join(OUT_DIR, "excluded_stations_log_hourly.csv"), index=False)
     log(f"\nSaved -> {OUT_DIR}/preprocessed_hourly.csv ({len(hourly_clean)} rows)")
@@ -158,4 +177,6 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default=paths.CONFIG_PATH)
+    run(parser.parse_args().config)

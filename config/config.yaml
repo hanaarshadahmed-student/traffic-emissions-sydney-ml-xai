@@ -19,7 +19,7 @@ pipeline:
   run_tuning: false   # true = `stage: all` also runs the (slow) tune stage
 
 # ---------------------------------------------------------------------------
-# data -- station exclusions applied in 02_data_cleaning.py
+# data -- station exclusions applied in 02_cleaning.py
 # ---------------------------------------------------------------------------
 # MAIN ANALYSIS:        enabled: true   (the stations below are left out)
 # SENSITIVITY ANALYSIS: enabled: false  (everything kept) -- re-run
@@ -44,7 +44,7 @@ data:
       "6119-PR": "PORT MACQUARIE AQ site: >3x year-on-year NO2 shift unrelated to traffic; 87.3 km from monitor"
 
 # ---------------------------------------------------------------------------
-# training -- what 06_train_models.py trains and how it's scored
+# training -- what 06_run_models.py trains and how it's scored
 # ---------------------------------------------------------------------------
 # grain:          "daily" or "hourly"
 # feature_sets:   which feature_manifest.json feature sets to train on,
@@ -57,7 +57,7 @@ data:
 #                 while iterating; test is reported, never tuned on
 # report_splits:  every split each fitted model is scored on
 # baselines:      also score naive persistence + seasonal-climatology
-# models:         names must match src/models.py; enabled: false skips one
+# models:         names must match scripts/models.py; enabled: false skips one
 training:
   grain: hourly
   feature_sets:
@@ -86,7 +86,7 @@ training:
         random_state: 42
 
     ridge:
-      enabled: true   # diagnostic baseline -- see src/models.py
+      enabled: true   # diagnostic baseline -- see scripts/models.py
       params:
         alpha: 1.0
         random_state: 42

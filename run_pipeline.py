@@ -1,19 +1,19 @@
 """
 CO2/NO2 Traffic-Emissions Capstone -- Pipeline runner
 
-The one command for the whole project. Runs the numbered scripts in
-src/ in order, or just one stage, based on `pipeline.stage` in
+The one command for the whole project. Runs the numbered stage scripts
+in src/ (plus the tuning scripts in scripts/tuning/) in order, or just one stage, based on `pipeline.stage` in
 config/config.yaml (or whatever --config points at). Streams each
 script's own output live, times it, and prints a summary at the end.
 
 Stages (pipeline order):
     ingest      src/01_data_ingestion.py
-    clean       src/02_data_cleaning.py
+    clean       src/02_cleaning.py
     preprocess  src/03_data_preprocessing.py
     features    src/04_feature_engineering.py
     split       src/05_train_test_split.py
-    train       src/06_train_models.py
-    tune        src/tuning/tune_xgboost.py + src/tuning/tune_svr.py
+    train       src/06_run_models.py
+    tune        scripts/tuning/tune_xgboost.py + scripts/tuning/tune_svr.py
     evaluate    src/07_evaluation.py
 
 `stage: all` runs every stage (tune only if pipeline.run_tuning: true)
@@ -43,42 +43,41 @@ from pathlib import Path
 import yaml
 
 ROOT_DIR = Path(__file__).resolve().parent
-SRC_DIR = ROOT_DIR / "src"
-sys.path.insert(0, str(SRC_DIR))
+sys.path.insert(0, str(ROOT_DIR))
 
-import paths  # noqa: E402
+from scripts import paths  # noqa: E402
 
-# (stage name, scripts (relative to src/), label, required inputs relative
+# (stage name, scripts (relative to the repo root), label, required inputs relative
 # to the repo root -- {grain} is filled in from training.grain,
 # whether the scripts accept --config <config.yaml>)
 STAGES = [
-    ("ingest", ["01_data_ingestion.py"], "Data ingestion", [], False),
-    ("clean", ["02_data_cleaning.py"], "Data cleaning", [
+    ("ingest", ["src/01_data_ingestion.py"], "Data ingestion", [], False),
+    ("clean", ["src/02_cleaning.py"], "Data cleaning", [
         "data/processed/final_combined_dataset_daily.csv",
         "data/processed/final_combined_dataset_hourly.csv",
     ], True),
-    ("preprocess", ["03_data_preprocessing.py"], "Preprocessing (impute/encode)", [
+    ("preprocess", ["src/03_data_preprocessing.py"], "Preprocessing (impute/encode)", [
         "data/processed/preprocessed_daily.csv",
         "data/processed/preprocessed_hourly.csv",
     ], False),
-    ("features", ["04_feature_engineering.py"], "Feature engineering", [
+    ("features", ["src/04_feature_engineering.py"], "Feature engineering", [
         "data/processed/final_daily.csv",
         "data/processed/final_hourly.csv",
     ], False),
-    ("split", ["05_train_test_split.py"], "Train/val/test split + scaling", [
+    ("split", ["src/05_train_test_split.py"], "Train/val/test split + scaling", [
         "data/processed/features_daily.csv",
         "data/processed/features_hourly.csv",
         "data/processed/feature_manifest.json",
     ], False),
-    ("train", ["06_train_models.py"], "Model training + scoring", [
+    ("train", ["src/06_run_models.py"], "Model training + scoring", [
         "data/processed/splits/{grain}_train.csv",
         "data/processed/splits/{grain}_val.csv",
     ], True),
-    ("tune", ["tuning/tune_xgboost.py", "tuning/tune_svr.py"], "Hyperparameter tuning", [
+    ("tune", ["scripts/tuning/tune_xgboost.py", "scripts/tuning/tune_svr.py"], "Hyperparameter tuning", [
         "data/processed/splits/daily_train.csv",
         "data/processed/splits/hourly_train.csv",
     ], False),
-    ("evaluate", ["07_evaluation.py"], "Evaluation tables + plots", [
+    ("evaluate", ["src/07_evaluation.py"], "Evaluation tables + plots", [
         "results/results.json",
     ], False),
 ]
@@ -125,8 +124,8 @@ def check_inputs(required: list[str], grain: str) -> list[str]:
 
 
 def run_script(name: str, script: str, label: str, extra_args: list[str]) -> float:
-    cmd = [sys.executable, str(SRC_DIR / script), *extra_args]
-    print(f"\n{'='*70}\n[{name}] {label}  ->  src/{script} {' '.join(extra_args)}\n{'='*70}")
+    cmd = [sys.executable, str(ROOT_DIR / script), *extra_args]
+    print(f"\n{'='*70}\n[{name}] {label}  ->  {script} {' '.join(extra_args)}\n{'='*70}")
     start = time.perf_counter()
     result = subprocess.run(cmd, cwd=ROOT_DIR)
     elapsed = time.perf_counter() - start

@@ -1,10 +1,10 @@
-# Hyperparameter tuning config -- read by src/tuning/tune_xgboost.py and
-# src/tuning/tune_svr.py (the `tune` stage of run_pipeline.py).
+# Hyperparameter tuning config -- read by scripts/tuning/tune_xgboost.py and
+# scripts/tuning/tune_svr.py (the `tune` stage of run_pipeline.py).
 #
 # Shared settings at the top apply to both models; each model's own
 # section can override any of them (e.g. add `n_trials: 30` under svr:).
 #
-# How candidates are picked (src/tuning/common.py): baseline_params first,
+# How candidates are picked (scripts/tuning/common.py): baseline_params first,
 # then every required_candidates entry, then random draws from
 # search_space, de-duplicated and cut to n_trials. The winner is chosen on
 # `split` (val) only; test is scored once afterwards, never tuned on.

@@ -1,11 +1,12 @@
 """
 CO2/NO2 Traffic-Emissions Capstone -- Shared modeling utilities
 
-06_run_models.py and the tuning scripts (scripts/tuning/) import from here
-to load data, score predictions, and save results -- so every model in
-scripts/models.py trains and is evaluated the exact same way.
+src/06_run_models.py imports from here to load data, score predictions,
+and save results -- so every model in models/ trains and is evaluated
+the exact same way. Individual model files under models/ only need to
+define the estimator itself; they don't import this module directly.
 
-Usage:
+Usage from 06_run_models.py:
 
     from model_utils import load_split, get_feature_columns, evaluate, save_result
 
@@ -31,12 +32,12 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-from scripts import paths
-
-SPLITS_DIR = paths.SPLITS_DIR
-RESULTS_DIR = paths.RESULTS_DIR
-MANIFEST_PATH = paths.FEATURE_MANIFEST_PATH
-SPLIT_MANIFEST_PATH = paths.SPLIT_MANIFEST_PATH
+ROOT_DIR = Path(__file__).resolve().parents[1]
+PROCESSED_DIR = ROOT_DIR / "data" / "processed"
+SPLITS_DIR = PROCESSED_DIR / "splits"
+RESULTS_DIR = PROCESSED_DIR / "model_results"
+MANIFEST_PATH = PROCESSED_DIR / "feature_manifest.json"
+SPLIT_MANIFEST_PATH = SPLITS_DIR / "split_manifest.json"
 
 DEFAULT_TARGET = "no2_pphm"
 
@@ -123,7 +124,7 @@ def load_split(
 
 def fit_with_optional_weight(model, X, y, sample_weight) -> bool:
     """Fits `model` with sample_weight if its .fit() accepts that
-    parameter (RandomForest/DecisionTree/Ridge/SVR/XGBoost all do),
+    parameter (RandomForestRegressor/DecisionTreeRegressor both do),
     otherwise falls back to a plain .fit(X, y) so a future model that
     doesn't support weighting still runs instead of crashing. Returns
     True if the weight was actually used, so the caller can report it.
@@ -154,7 +155,7 @@ def evaluate_per_station(y_true, y_pred, station_ids: pd.Series) -> pd.DataFrame
     worst-R2-first. Useful for telling apart "the features genuinely
     don't generalize" from "one or two short-history stations (e.g.
     6178-PR at ~60 rows total) are dragging the aggregate score down" --
-    see the ridge note in scripts/models.py for why that distinction matters.
+    see models/ridge.py's docstring for why that distinction matters.
 
     Stations with fewer than 5 eval rows get R2 = NaN rather than a
     number: R2 computed on 2-4 points is noise, not a real error metric,
@@ -186,7 +187,7 @@ def save_per_station(
     per model/grain/feature_set/split, overwritten on rerun) alongside
     the aggregate results.json, so you can open it directly to see which
     stations are driving a low aggregate score."""
-    out_dir = paths.PER_STATION_DIR
+    out_dir = RESULTS_DIR / "per_station"
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{model_name}_{stage}_{grain}_{feature_set}_{split}.csv"
     per_station.to_csv(path, index=False)
@@ -220,15 +221,15 @@ def save_result(
     split: str = "val",
     stage: str = "baseline",
 ) -> Path:
-    """Upserts one run's metrics into results/results.json,
+    """Upserts one run's metrics into data/processed/model_results/results.json,
     keyed on (model, stage, grain, feature_set, split).
 
     `stage` separates a model's untuned baseline run (06_run_models.py)
-    from its tuned run (scripts/tuning/*), so tuning XGBoost no longer
+    from its tuned run (models/fine_tuning/*), so tuning XGBoost no longer
     overwrites the XGBoost baseline row -- both are kept, and
     07_evaluation.py shows them side by side."""
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    results_path = paths.RESULTS_PATH
+    results_path = RESULTS_DIR / "results.json"
     results = json.loads(results_path.read_text()) if results_path.exists() else []
     results = [
         r

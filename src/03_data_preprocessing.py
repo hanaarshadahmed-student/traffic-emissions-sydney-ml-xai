@@ -1,5 +1,10 @@
 """
-CO2/NO2 Traffic-Emissions Capstone -- Final Preprocessing (post-EDA)
+CO2/NO2 Traffic-Emissions Capstone -- Stage 03: Preprocessing
+
+NO2 outlier report (reported, not removed), aq_quality_weight for
+REVIEW-flagged stations, train-only median imputation, redundant-column
+drops and station one-hot encoding. The reasoning behind each decision is
+in docs/Data.md ("Data-quality decisions").
 
 Input:  data/processed/preprocessed_daily.csv
         data/processed/preprocessed_hourly.csv
@@ -11,12 +16,20 @@ Output: data/processed/final_daily.csv      (zero NaNs in raw columns,
 import pandas as pd
 import os
 
-from model_fixed.split_utils import train_only_median
+import sys
+from pathlib import Path
 
-IN_DIR = "data/processed"
-OUT_DIR = "data/processed"
+# Repo root on the import path, so the shared code in scripts/ is importable
+# whichever folder you run this from.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-REVIEW_WEIGHT = 0.5  # judgement call -- see docstring point 2. Adjust and justify in your report.
+from scripts import paths  # noqa: E402
+from scripts.split_utils import train_only_median  # noqa: E402
+
+IN_DIR = str(paths.PROCESSED_DIR)
+OUT_DIR = str(paths.PROCESSED_DIR)
+
+REVIEW_WEIGHT = 0.5  # judgement call -- see docs/Data.md "aq_quality_weight". Adjust and justify in your report.
 
 
 def log(msg):
@@ -24,7 +37,7 @@ def log(msg):
 
 
 # ---------------------------------------------------------------------------
-# Outliers + AQ-match quality (unchanged from the previous version)
+# Outliers + AQ-match quality
 # ---------------------------------------------------------------------------
 
 def report_no2_outliers(df, label):
@@ -59,7 +72,7 @@ def add_aq_quality_weight(df, label):
 
 # ---------------------------------------------------------------------------
 # Missing values / redundant columns / encoding
-# (moved from 04_feature_engineering.py's old Stage 2 -- raw columns only)
+# (raw columns only -- derived features are built in 04)
 # ---------------------------------------------------------------------------
 
 def drop_redundant_weather_columns(df):
@@ -85,7 +98,7 @@ def impute_wind(df, label, time_cols):
     placeholder for models that can't take NaN.
 
     That placeholder is the median computed over TRAIN rows only (per
-    05_train_test_split.py's chronological per-station split, via
+    05_train_test_split.py's global chronological split, via
     split_utils). Using the whole dataset's median here -- including rows
     that will later become val/test -- would leak those rows' distribution
     into every training row's wind features, and from there into every
@@ -141,7 +154,7 @@ def finalize(df, label, time_cols):
     report_no2_outliers(df, label)
     df = add_aq_quality_weight(df, label)
     log(f"[{label}] posted_speed_kmh present: {'posted_speed_kmh' in df.columns} "
-        f"(kept as numeric feature -- see docstring point 3)")
+        f"(kept as numeric feature -- see docs/Data.md \"Posted speed limit\")")
     df = clean_raw_columns(df, label, time_cols)
     return df
 

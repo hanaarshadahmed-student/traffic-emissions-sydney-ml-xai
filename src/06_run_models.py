@@ -1,23 +1,23 @@
 """
-CO2/NO2 Traffic-Emissions Capstone -- Model runner
+CO2/NO2 Traffic-Emissions Capstone -- Stage 06: Train models
 
-Reads config/models_config.yaml and trains + evaluates every model marked
-enabled: true, for every feature_set listed, on the configured grain and
-split. Every model is loaded, trained, and scored the exact same way --
-that logic lives here and in model_utils.py, once, so an individual model
-file under models/ only has to define the estimator itself.
+Reads the `training` section of config/config.yaml and trains + evaluates
+every model marked enabled: true, for every feature_set listed, on the
+configured grain and split. Every model is loaded, trained, and scored the exact same way --
+that logic lives here and in model_utils.py, once; scripts/models.py only
+says which estimator class each model name means.
 
-Results are appended to data/processed/model_results/results.json via
+Results are appended to results/results.json via
 model_utils.save_result(), keyed on (model, stage, grain, feature_set, split)
 (stage="baseline" here; the fine-tuning scripts write stage="tuned") --
 re-running after a config change overwrites just that model's row, it
 doesn't duplicate or wipe anyone else's.
 
 To turn a model on/off, change its hyperparameters, or switch grain /
-feature sets / split: edit config/models_config.yaml. Nothing here needs
-to change for that.
+feature sets / split: edit config/config.yaml. Nothing here needs to
+change for that.
 
-To add a new model entirely: see models/__init__.py.
+To add a new model entirely: see scripts/models.py.
 
 Usage:
     python src/06_run_models.py
@@ -27,23 +27,21 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import yaml
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
-DEFAULT_CONFIG_PATH = ROOT_DIR / "config" / "models_config.yaml"
+import sys
 
-# models/ sits at the repo root, alongside src/ -- not underneath it -- so
-# it isn't on sys.path by default the way this script's own directory is.
-sys.path.insert(0, str(ROOT_DIR))
+# Repo root on the import path, so the shared code in scripts/ is importable
+# whichever folder you run this from.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.models import REGISTRY  # noqa: E402  (must follow the sys.path insert above)
-import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
-
-from model_fixed.model_utils import (  # noqa: E402
+from scripts import paths  # noqa: E402
+from scripts.models import REGISTRY  # noqa: E402
+from scripts.model_utils import (  # noqa: E402
     SPLITS_DIR,
     Timer,
     evaluate,
@@ -57,8 +55,9 @@ from model_fixed.model_utils import (  # noqa: E402
 
 
 def load_config(config_path: Path) -> dict:
+    """The `training` section of config.yaml."""
     with open(config_path) as f:
-        return yaml.safe_load(f)
+        return yaml.safe_load(f)["training"]
 
 
 def run_one(
@@ -70,7 +69,7 @@ def run_one(
     worst-station printout (val while iterating)."""
     if name not in REGISTRY:
         raise KeyError(
-            f"'{name}' isn't registered in models/__init__.py. "
+            f"'{name}' isn't registered in scripts/models.py. "
             f"Known models: {sorted(REGISTRY)}"
         )
     X_train, y_train, w_train = load_split(grain, "train", feature_set, with_weight=True)
@@ -149,12 +148,12 @@ def run_baselines(grain: str, feature_sets: list[str], splits: list[str], target
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
+    parser.add_argument("--config", type=Path, default=paths.CONFIG_PATH)
     parser.add_argument(
         "--worst-stations", type=int, default=3,
         help="How many lowest-R2 stations to print per run (0 to disable). "
              "Full breakdown is always saved to "
-             "data/processed/model_results/per_station/ regardless.",
+             "results/per_station/ regardless.",
     )
     args = parser.parse_args()
 
@@ -206,7 +205,7 @@ def main():
 
     if not ran_any:
         print("No models enabled -- set enabled: true for at least one "
-              f"model in {args.config}")
+              f"model under training.models in {args.config}")
 
 
 if __name__ == "__main__":

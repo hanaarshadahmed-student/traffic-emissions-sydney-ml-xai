@@ -1,16 +1,18 @@
 """
-CO2/NO2 Traffic-Emissions Capstone -- Feature Engineering (combined)
+CO2/NO2 Traffic-Emissions Capstone -- Stage 04: Feature engineering
 
-This replaces the two earlier scripts (04_feature_engineering.py,
-04_feature_engineering_advanced.py). The "advanced" pipeline is the base --
-exact-timestamp lags with availability flags (no assumption of contiguous
+Exact-timestamp lags with availability flags (no assumption of contiguous
 rows), directional traffic features from the raw per-station counter files,
 station metadata (road classification, RMS region, device type),
 physically-motivated weather features (wind vector decomposition,
-dispersion proxy), and time-aware rolling windows -- plus two EDA-validated
-groupings carried over from the simpler script that the advanced pipeline
-didn't have: a coarse Highway/Major Road/Local Street bucket from the road's
+dispersion proxy), time-aware rolling windows, plus two EDA-validated
+groupings: a coarse Highway/Major Road/Local Street bucket from the road's
 own name, and a Summer/Autumn/Winter/Spring season one-hot.
+
+validate_output() checks every build before it's written (no NaNs/infs or
+duplicate keys, one-hot groups are exclusive, heavy_vehicle_share within
+[0, 1], NO2 lag features only look backwards) and stops with an error if
+any check fails.
 
 Input:  data/processed/final_daily.csv
         data/processed/final_hourly.csv
@@ -31,20 +33,27 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+import sys
+
+# Repo root on the import path, so the shared code in scripts/ is importable
+# whichever folder you run this from.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts import paths  # noqa: E402
+
 warnings.filterwarnings("ignore", message="DataFrame is highly fragmented")
 
 
 # Project paths
-ROOT_DIR = Path(__file__).resolve().parents[1]
-PROCESSED_DIR = ROOT_DIR / "data" / "processed"
-TRAFFIC_DIR = ROOT_DIR / "data" / "raw" / "traffic"
-STATION_REFERENCE_PATH = TRAFFIC_DIR / "station_reference.csv"
+PROCESSED_DIR = paths.PROCESSED_DIR
+TRAFFIC_DIR = paths.TRAFFIC_DIR
+STATION_REFERENCE_PATH = paths.STATION_REFERENCE_PATH
 
 DAILY_INPUT = PROCESSED_DIR / "final_daily.csv"
 HOURLY_INPUT = PROCESSED_DIR / "final_hourly.csv"
 DAILY_OUTPUT = PROCESSED_DIR / "features_daily.csv"
 HOURLY_OUTPUT = PROCESSED_DIR / "features_hourly.csv"
-MANIFEST_OUTPUT = PROCESSED_DIR / "feature_manifest.json"
+MANIFEST_OUTPUT = paths.FEATURE_MANIFEST_PATH
 
 TARGET_COLUMNS = ["no2_pphm", "target_no2_log1p", "target_no2_sqrt"]
 SAMPLE_WEIGHT_COLUMN = "aq_quality_weight"
@@ -710,7 +719,12 @@ def drop_constant_numeric_columns(df: pd.DataFrame) -> tuple[pd.DataFrame, list[
     return df.drop(columns=dropped), dropped
 
 
-def validate_output(df: pd.DataFrame, grain: str) -> None:
+ONE_HOT_GROUPS = ("season_", "road_bucket_", "stn_")
+
+
+def validate_output(df: pd.DataFrame, grain: str, dropped_constant: list[str]) -> None:
+    """Sanity checks on the finished feature table -- raises ValueError
+    (so the pipeline stops) rather than writing a broken file."""
     keys = ["station_id", "date"]
     if grain == "hourly":
         keys.append("hour_ending")
@@ -723,6 +737,36 @@ def validate_output(df: pd.DataFrame, grain: str) -> None:
         raise ValueError(f"{grain} output contains numeric NaNs: {columns}")
     if np.isinf(numeric.to_numpy(dtype=float)).any():
         raise ValueError(f"{grain} output contains infinite values")
+
+    # One-hot groups: every row falls in exactly one category. If a
+    # category column was dropped as constant, rows can sum to 0 instead.
+    for prefix in ONE_HOT_GROUPS:
+        columns = [c for c in df.columns if c.startswith(prefix)]
+        if not columns:
+            continue
+        row_sums = df[columns].sum(axis=1)
+        allowed = {0, 1} if any(c.startswith(prefix) for c in dropped_constant) else {1}
+        if not set(row_sums.unique()).issubset(allowed):
+            raise ValueError(f"{grain} one-hot group '{prefix}*' is not one-category-per-row")
+
+    if not df["heavy_vehicle_share"].between(0.0, 1.0).all():
+        raise ValueError(f"{grain} heavy_vehicle_share outside [0, 1]")
+
+    # NO2 lag leakage check: wherever the 1-step lag is available it must
+    # equal the station's NO2 exactly one step EARLIER (never the current
+    # or a future value).
+    step, suffix = (pd.Timedelta(days=1), "1d") if grain == "daily" else (pd.Timedelta(hours=1), "1h")
+    lag, available = f"no2_pphm_lag_{suffix}", f"no2_pphm_lag_{suffix}_available"
+    if lag in df.columns and available in df.columns:
+        previous = df[["station_id", "timestamp", "no2_pphm"]].copy()
+        previous["timestamp"] = previous["timestamp"] + step
+        check = df.loc[df[available] == 1, ["station_id", "timestamp", lag]].merge(
+            previous, on=["station_id", "timestamp"], how="left"
+        )
+        if not np.allclose(check[lag], check["no2_pphm"]):
+            raise ValueError(f"{grain} {lag} does not match the previous step's NO2 (leakage?)")
+
+    print(f"{grain}: validation passed (NaN/inf, keys, one-hot, heavy share, lag leakage)")
 
 
 def build_dataset(input_path: Path, output_path: Path, grain: str) -> pd.DataFrame:
@@ -741,7 +785,7 @@ def build_dataset(input_path: Path, output_path: Path, grain: str) -> pd.DataFra
     df["timestamp"] = df["_timestamp"]
     df = df.drop(columns="_timestamp")
     df, dropped = drop_constant_numeric_columns(df)
-    validate_output(df, grain)
+    validate_output(df, grain, dropped)
     df.to_csv(output_path, index=False)
     print(
         f"{grain}: {len(df):,} rows, {len(df.columns):,} columns, "

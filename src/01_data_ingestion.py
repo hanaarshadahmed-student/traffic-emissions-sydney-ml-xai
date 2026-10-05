@@ -34,7 +34,7 @@ Station-metadata enrichment added:
 Design principle unchanged: nothing is filtered/dropped here except the
 above structural exclusion for the hourly build. Station-level modeling
 decisions (dropping no-NO2-coverage stations, thin-coverage stations,
-missing target rows) still happen in 02_data_preprocessing.py, not here.
+missing target rows) still happen in 02_cleaning.py, not here.
 
 Requires: pandas, python-calamine, holidays, pyshp
     pip install pandas python-calamine holidays pyshp
@@ -52,13 +52,22 @@ import pandas as pd
 import glob, os, json, math
 import holidays as holidays_lib
 
-TRAFFIC_DIR = "data/raw/traffic"
-BOM_DIR = "data/raw/weather"
-METRO_WEATHER_DIR = "data/raw/weather"
-METRO_EMISSIONS_DIR = "data/raw/emissions"
-AQ_SITES_PATH = "data/raw/air_quality/nsw_air_quality_sites.json"
-SPEED_ZONES_SHP = "data/raw/speed_zones/Speed_Zones.shp"
-OUT_DIR = "data/processed"
+import sys
+from pathlib import Path
+
+# Repo root on the import path, so the shared code in scripts/ is importable
+# whichever folder you run this from.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts import paths  # noqa: E402
+
+TRAFFIC_DIR = str(paths.TRAFFIC_DIR)
+BOM_DIR = str(paths.WEATHER_DIR)
+METRO_WEATHER_DIR = str(paths.WEATHER_DIR)
+METRO_EMISSIONS_DIR = str(paths.EMISSIONS_DIR)
+AQ_SITES_PATH = str(paths.AQ_SITES_PATH)
+SPEED_ZONES_SHP = str(paths.SPEED_ZONES_SHP)
+OUT_DIR = str(paths.PROCESSED_DIR)
 DAILY_OUT_PATH = os.path.join(OUT_DIR, "final_combined_dataset_daily.csv")
 HOURLY_OUT_PATH = os.path.join(OUT_DIR, "final_combined_dataset_hourly.csv")
 AQ_VERIFICATION_OUT_PATH = os.path.join(OUT_DIR, "aq_site_verification.csv")

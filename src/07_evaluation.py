@@ -3,10 +3,9 @@ CO2/NO2 Traffic-Emissions Capstone -- Evaluation / model comparison
 
 Shows how every model does on TRAIN, VALIDATION and TEST, side by side,
 for both its baseline run (06_run_models.py) and its tuned run
-(models/fine_tuning/*), per grain and feature set.
+(scripts/tuning/*), per grain and feature set.
 
-It only reads data/processed/model_results/results.json -- nothing is
-retrained -- so it's instant and safe to run as often as you like.
+It only reads results/results.json -- nothing is retrained -- so it's instant and safe to run as often as you like.
 
 Reading the table:
   train >> val          the model is overfitting (memorising train)
@@ -14,7 +13,7 @@ Reading the table:
   val >> test           the model was (indirectly) tuned to val, or the
                         test period genuinely behaves differently
 
-Outputs (data/processed/model_results/evaluation/):
+Outputs (results/evaluation/):
   all_results.csv                 every results.json row, flattened
   train_val_test_<grain>.csv      model x stage rows, metric x split columns
   stage_delta_<grain>.csv         tuned minus baseline, per split
@@ -39,10 +38,17 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
-RESULTS_DIR = ROOT_DIR / "data" / "processed" / "model_results"
-RESULTS_PATH = RESULTS_DIR / "results.json"
-OUT_DIR = RESULTS_DIR / "evaluation"
+import sys
+
+# Repo root on the import path, so the shared code in scripts/ is importable
+# whichever folder you run this from.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts import paths  # noqa: E402
+
+ROOT_DIR = paths.ROOT_DIR
+RESULTS_PATH = paths.RESULTS_PATH
+OUT_DIR = paths.EVALUATION_DIR
 
 STAGES = ["baseline", "tuned"]
 SPLITS = ["train", "val", "test"]
@@ -53,8 +59,8 @@ KEY = ["model", "stage", "grain", "feature_set", "split"]
 def load_results() -> pd.DataFrame:
     if not RESULTS_PATH.exists():
         raise SystemExit(
-            f"{RESULTS_PATH} not found -- run src/06_run_models.py "
-            "(and/or models/train_xgboost.py, models/train_svr.py) first."
+            f"{RESULTS_PATH} not found -- run the train stage "
+            "(and/or the tune stage) of run_pipeline.py first."
         )
     df = pd.DataFrame(json.loads(RESULTS_PATH.read_text()))
 
@@ -142,7 +148,7 @@ def plot(df: pd.DataFrame, path: Path, title: str) -> None:
 
 def print_trials(models: list[str] | None) -> None:
     for model in ["xgboost", "svr"]:
-        path = RESULTS_DIR / f"{model}_tuning_trials.csv"
+        path = paths.TUNING_DIR / f"{model}_tuning_trials.csv"
         if (models and model not in models) or not path.exists():
             continue
         trials = pd.read_csv(path)
@@ -184,7 +190,7 @@ def main() -> None:
         missing = table[table.isna().any(axis=1)]
         if len(missing):
             print("\n  '-' = that split hasn't been scored yet for that model/stage; "
-                  "re-run it (06_run_models.py or the tuning script) to fill it in.")
+                  "re-run it (train or tune stage) to fill it in.")
 
         delta = stage_delta(group)
         if not delta.empty:
