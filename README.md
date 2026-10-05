@@ -8,241 +8,138 @@ explainable AI (SHAP) to identify key drivers.
 > across 3 Sydney-only stations. It has since pivoted to a **directly
 > measured** NO₂ target (per supervisor guidance — computed/estimated
 > targets weren't acceptable) across 15 candidate stations spanning NSW,
-> not just Sydney. See `doc/Data.md` for the full history and current
-> data-quality decisions.
+> not just Sydney. See `docs/Data.md` for the full history and every
+> data-quality decision.
 
-## Project structure
-
-```
-data/
-  raw/         Raw downloaded files — not tracked in git
-    traffic/       TfNSW Traffic Volume Viewer exports, per station
-    weather/       Metro AQ-portal hourly weather + BOM rural daily weather
-    emissions/     Metro AQ-portal hourly pollutant data (incl. NO2)
-    air_quality/   nsw_air_quality_sites.json — optional, enables AQ-site verification
-    speed_zones/   Speed_Zones.{shp,shx,dbf,prj} — optional, enables posted-speed
-                   matching. NOT in git (individual files exceed GitHub's size
-                   limits) — download from TfNSW and place here manually.
-  processed/   Output of each pipeline stage (see "Running the pipeline" below)
-config/
-  models_config.yaml           Which models run, their hyperparameters, the
-                                grain/feature_set/split to evaluate on, and
-                                which pipeline stage(s) src/run_pipeline.py
-                                runs. random_forest, decision_tree, and ridge
-                                are enabled by default.
-  xgboost_baseline.yaml        Reproducible XGBoost validation baseline using
-                                the same daily data and feature sets.
-  xgboost_tuning.yaml          Daily/hourly XGBoost search space and settings.
-  svr_tuning.yaml              Daily SVR search space and validation settings.
-models/
-  __init__.py                  Registry mapping a config model name to its
-                                build_model() function.
-  random_forest.py             Defines ONLY the estimator (a few lines —
-                                NAME + build_model()). decision_tree.py,
-                                ridge.py, and xgboost_model.py follow the
-                                same pattern.
-  svr_model.py                 Defines the Support Vector Regressor estimator.
-  fine_tuning/
-    common.py                  Shared random search and chronological learning
-                                curves, including per-station diagnostics.
-    train_xgboost.py           Tunes daily/hourly XGBoost with early stopping.
-    train_svr.py               Tunes SVR on the shared scaled daily features.
-  train_xgboost.py             Compatibility entry point for fine_tuning/.
-  train_svr.py                 Compatibility entry point for fine_tuning/.
-notebooks/
-  01_data_exploration.ipynb     EDA — the most current/complete notebook
-  02_feature_engineering.ipynb  (not yet built)
-  03_model_experiments.ipynb    (not yet built)
-  04_xai_analysis.ipynb         (not yet built)
-src/
-  run_pipeline.py              Runner: executes 01-06 in order (or just one
-                                stage) based on the `pipeline.stage` setting
-                                in config/models_config.yaml. See "Running
-                                the pipeline" below.
-  01_data_ingestion.py         Combine raw traffic/weather/emissions into one dataset
-                                per resolution, plus AQ-site verification and
-                                posted-speed matching
-  02_eda.py                    Row-level cleaning (drop no-NO2-coverage stations,
-                                sanity checks, dedup) — despite the filename, this
-                                is preprocessing, not exploratory analysis; see note below
-  03_data_preprocessing.py     Outlier reporting + AQ-match-quality weighting,
-                                missing-value imputation, redundant-column drops,
-                                station encoding. Imputation medians are fit on
-                                TRAIN-only rows (via split_utils.py) so no
-                                val/test-period value leaks into a training row.
-  04_feature_engineering.py    Feature creation: calendar (cyclical + season one-hot),
-                                station metadata, road-type encoding (both RMS
-                                classification and a coarse Highway/Major Road/Local
-                                Street bucket), directional traffic, exact-timestamp
-                                lags + rolling windows (with availability flags, no
-                                row-dropping), weather physics, target transforms.
-                                Writes feature_manifest.json listing exogenous vs.
-                                autoregressive features per grain.
-  05_train_test_split.py       Chronological 70:15:15 train/val/test split (one global cutoff date)
-                                + feature scaling (fit on train only). Writes
-                                data/processed/splits/{grain}_{train,val,test}.csv,
-                                {grain}_scaler.joblib, and split_manifest.json.
-  split_utils.py               Shared per-station chronological split logic used by
-                                BOTH 03 (to fit train-only imputation medians) and 05
-                                (to make the actual train/val/test split) — one
-                                definition of "train" so the two steps can't disagree.
-  model_utils.py               Shared load_split() / evaluate() / save_result()
-                                used by 06_run_models.py, so every model trains
-                                and is scored on the exact same rows/features and
-                                all results land in one place
-                                (data/processed/model_results/results.json).
-  06_run_models.py             Reads config/models_config.yaml, trains + evaluates
-                                every enabled model from models/, appends results.
-                                XGBoost can be run with xgboost_baseline.yaml.
-  07_deep_learning_*.py        (not yet built) LSTM + GRU on the hourly grain
-  08_hyperparameter_tuning.py  Implemented under models/fine_tuning/
-  09_evaluation.py             (not yet built) Final RMSE/MAE/R² comparison table
-
-                                across every model in model_results/results.json
-  10_explainability.py         (not yet built) SHAP on the best model
-results/       Model outputs, figures, SHAP plots
-```
-
-**Note on `02_eda.py`:** the numbering here doesn't match the content —
-it's a leftover from a mid-project renumbering. It currently holds
-preprocessing logic (drop stations with no NO2 coverage, validate ranges,
-deduplicate), not EDA. The real exploratory work lives in
-`notebooks/01_data_exploration.ipynb`. Rename fix pending — flagging here
-so nobody goes looking for EDA logic in the wrong file.
-
-## Setup
+## Quick start
 
 ```powershell
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+
+python run_pipeline.py
 ```
 
-`pyshp`, `holidays`, and `python-calamine` are all required (not just
-`pandas`/`numpy`) — `01_data_ingestion.py` uses `holidays` for real NSW
-public-holiday dates, `python-calamine` to read the AQ-portal `.xls`
-exports, and `pyshp` for the optional posted-speed matching.
+That's the whole workflow: **change settings in `config/config.yaml`, then
+run `python run_pipeline.py`.**
+
+## Where to change things
+
+| You want to… | Edit |
+|---|---|
+| Choose which stage(s) run | `config/config.yaml` → `pipeline.stage` |
+| Switch daily/hourly, feature sets, or the scoring split | `config/config.yaml` → `training` |
+| Turn a model on/off or change its hyperparameters | `config/config.yaml` → `training.models` |
+| Exclude a station / run the sensitivity analysis | `config/config.yaml` → `data.station_exclusions` |
+| Change the tuning search space or number of trials | `config/tuning.yaml` |
+| Add a new model | one line in `scripts/models.py` + a block in `config/config.yaml` |
+| Move a folder | `scripts/paths.py` (every location is defined there once) |
+| Change how a data step works | that stage's numbered script in `src/` |
+
+## Project structure
+
+```
+config/
+  config.yaml            pipeline stage, station exclusions, training + model params
+  tuning.yaml            XGBoost / SVR search spaces (shared settings + one section each)
+data/
+  raw/                   downloaded source files
+    air_quality/           nsw_air_quality_sites.json -- optional, enables AQ-site verification
+    emissions/             AQ-portal hourly pollutant data (incl. NO2)
+    speed_zones/           Speed_Zones.{shp,shx,dbf,prj} -- optional, gitignored (too big
+                           for GitHub); download from TfNSW and place here manually
+    traffic/               TfNSW Traffic Volume Viewer exports per station + station_reference.csv
+    weather/               AQ-portal hourly weather (metro) + BOM daily weather (rural)
+  processed/             outputs of stages 01-05 + splits/ (gitignored, always rebuildable)
+results/                 everything the models produce (kept across runs)
+  results.json             every model's train/val/test scores, baseline + tuned
+  per_station/             per-station breakdown of every run
+  tuning/                  tuning trials, best results, learning curves, overfitting, feature importance
+  evaluation/              07's comparison tables + plots
+  saved_models/            fitted tuned models (.joblib, gitignored)
+  shap/                    (later) SHAP outputs from 08
+docs/
+  Data.md                sources, stations, and every data-quality decision with its justification
+notebooks/
+  01_data_exploration.ipynb   EDA
+src/                     the pipeline stages, run in order by run_pipeline.py
+  01_data_ingestion.py        combine raw traffic/weather/NO2 per station -> daily + hourly datasets;
+                              AQ-site verification and posted-speed matching
+  02_cleaning.py              drop no-NO2 / excluded stations, range checks, drop missing target, dedup
+  03_data_preprocessing.py    outlier report, aq_quality_weight, train-only imputation, station one-hot
+  04_feature_engineering.py   calendar, road, directional, traffic, weather, lag/rolling, target features;
+                              feature_manifest.json; validation checks
+  05_train_test_split.py      global chronological 70/15/15 split, near-duplicate pruning, scaling (train-fit)
+  06_run_models.py            train + score every enabled model and the naive baselines -> results/
+  07_evaluation.py            train/val/test comparison tables + plots from results.json
+  08_explainability.py        (placeholder) SHAP on the best model
+scripts/                 shared code the stages import (not run directly, except tuning/)
+  paths.py                    every folder/file location, defined once
+  models.py                   model registry: config name -> estimator class
+  split_utils.py              the one definition of "train" (used by 03 and 05)
+  model_utils.py              shared load_split / evaluate / save_result
+  tuning/
+    common.py                 random search, learning curves, overfitting diagnostics
+    tune_xgboost.py           XGBoost tuning (daily + hourly, early stopping)
+    tune_svr.py               SVR tuning (daily)
+run_pipeline.py          runs everything (see below)
+```
 
 ## Running the pipeline
 
-Run every script **from the repo root**, not from inside `src/` — all
-paths (`data/raw/...`, `data/processed/...`) are relative to the project
-root, not to the script's own location. `src/run_pipeline.py` already
-does this for you (it sets the working directory itself), so it's the
-easiest way to run things either way.
+`run_pipeline.py` reads `pipeline.stage` from `config/config.yaml`:
 
-### Recommended: `run_pipeline.py`
+| Stage | Script | Output |
+|---|---|---|
+| `ingest` | `src/01_data_ingestion.py` | `final_combined_dataset_{daily,hourly}.csv`, `aq_site_verification.csv` |
+| `clean` | `src/02_cleaning.py` | `preprocessed_{daily,hourly}.csv`, `excluded_stations_log_*.csv` |
+| `preprocess` | `src/03_data_preprocessing.py` | `final_{daily,hourly}.csv` |
+| `features` | `src/04_feature_engineering.py` | `features_{daily,hourly}.csv`, `feature_manifest.json` |
+| `split` | `src/05_train_test_split.py` | `splits/{grain}_{train,val,test}.csv`, scalers, `split_manifest.json` |
+| `train` | `src/06_run_models.py` | `results/results.json`, `results/per_station/` |
+| `tune` | `scripts/tuning/tune_xgboost.py`, `scripts/tuning/tune_svr.py` | `results/tuning/`, `results/saved_models/` |
+| `evaluate` | `src/07_evaluation.py` | `results/evaluation/` |
 
-```powershell
-python src/run_pipeline.py
-```
+- **`stage: all`** runs every stage in order. It empties `data/processed/`
+  first so a run never mixes with a stale one; `results/` is never wiped.
+  Tuning is slow, so it's only included when `pipeline.run_tuning: true`.
+- **`stage: <name>`** runs just that stage and reuses what's on disk. The
+  runner checks the stage's inputs exist first and tells you which earlier
+  stage to run if not.
+- **`--stage`** overrides the config for a one-off, e.g.
+  `python run_pipeline.py --stage evaluate`.
+- **`--config`** points at a different config file, e.g. a copy for an
+  experiment: `python run_pipeline.py --config config/sensitivity.yaml`.
 
-It reads `pipeline.stage` from `config/models_config.yaml`:
+Each script can still be run on its own (`python src/04_feature_engineering.py`)
+from any folder — paths come from `scripts/paths.py`. Each prints a summary on
+completion (row counts, dropped stations, imputation, validation); check it
+before moving on.
 
-```yaml
-pipeline:
-  stage: all       # run every stage, 01 -> 06, wiping data/processed/
-                   # first (except model_results/, the cross-run results
-                   # log) so this run never mixes with a stale one
-  stage: models    # run ONLY 06_run_models.py, reusing whatever's
-                   # already in data/processed/splits/ — the fast path
-                   # once everything through 05 is already built
-  # or: ingest | eda | preprocess | features | split
-```
+### Notes on the modelling stages
 
-`--stage` on the command line overrides the yaml for a one-off, e.g.
-`python src/run_pipeline.py --stage features` to redo just feature
-engineering without touching the yaml. Before running a single stage it
-checks the previous stage's output files actually exist and tells you
-plainly which stage to run first if not, instead of letting the script
-fail with a less obvious error. It streams each stage's own print
-output live, times it, and prints a summary table at the end.
+- **Feature sets.** Every model is trained once per feature set in
+  `training.feature_sets`: `exogenous` (traffic/weather/calendar/road/station,
+  no NO2 history), `autoregressive` (NO2's own lags only) and `all`.
+- **Baselines.** `train` also scores naive persistence and seasonal
+  climatology — the bar every real model has to clear.
+- **Scoring.** Choose between models on `val`; `test` is reported, never
+  tuned on. `07_evaluation.py --trials` also prints every tuning candidate.
+- **Status.** Decision tree, random forest, ridge, SVR and XGBoost are
+  implemented. SHAP (`08_explainability.py`) is next.
 
-### Manual, stage by stage
+## Setup notes
 
-Equivalent to `stage: all`, run one script at a time if you want to
-inspect the output between steps:
-
-```powershell
-python src/01_data_ingestion.py
-python src/02_eda.py
-python src/03_data_preprocessing.py
-python src/04_feature_engineering.py
-python src/05_train_test_split.py --grain all
-python src/06_run_models.py
-```
-
-1. **`01_data_ingestion.py`** — builds `data/processed/final_combined_dataset_daily.csv`
-   (all 15 candidate stations) and `final_combined_dataset_hourly.csv` (the
-   8 stations with both hourly weather and hourly NO2). Also runs AQ-site
-   verification and posted-speed matching if the optional files under
-   `data/raw/air_quality/` and `data/raw/speed_zones/` are present —
-   skipped with a warning otherwise, not a failure.
-2. **`02_eda.py`** — drops stations with zero NO2 coverage, validates
-   traffic/temperature ranges, drops rows missing the NO2 target,
-   deduplicates. Outputs `preprocessed_daily.csv` / `preprocessed_hourly.csv`.
-3. **`03_data_preprocessing.py`** — reports NO2 outliers per station
-   (doesn't remove them — see `doc/Data.md`), adds `aq_quality_weight`,
-   imputes missing weather values, drops redundant/unused columns,
-   one-hot encodes station ID. Imputation medians are fit on TRAIN-only
-   rows (via `split_utils.py`, the same per-station chronological split
-   `05` uses) so a training row's imputed value never carries information
-   from a row that ends up in val/test. Outputs `final_daily.csv` /
-   `final_hourly.csv`.
-4. **`04_feature_engineering.py`** — calendar (cyclical + season one-hot),
-   station metadata, two road-type encodings (RMS classification + a
-   coarse Highway/Major Road/Local Street bucket), directional traffic,
-   exact-timestamp lag and rolling-window features with availability flags,
-   weather physics (wind decomposition, dispersion proxy), target
-   transforms (`target_no2_log1p`, `target_no2_sqrt`). Outputs
-   `features_daily.csv` / `features_hourly.csv` (zero NaNs, model-ready)
-   and `feature_manifest.json` (exogenous vs. autoregressive feature lists
-   per grain — useful for choosing what a model is allowed to see).
-
-5. **`05_train_test_split.py`** — splits each grain into train/val/test
-   **chronologically with one global cutoff date** (not randomly, and not
-   per station — see `split_utils.py` and `doc/Data.md` for the leakage
-   this avoids), prunes near-duplicate features on train rows only, and
-   fits feature scaling on the train split only.
-   Outputs `data/processed/splits/{grain}_{train,val,test}.csv`,
-   `{grain}_scaler.joblib`, and `split_manifest.json`.
-6. **`06_run_models.py`** — reads `config/models_config.yaml` and trains +
-   evaluates every enabled model from `models/`, appending results to
-   `data/processed/model_results/results.json`. Run the XGBoost baseline
-   with `python src/06_run_models.py --config config/xgboost_baseline.yaml`.
-   Expect one line of output per feature set (`exogenous`,
-   `autoregressive`, `all`).
-
-   Tune and train XGBoost across daily and hourly data with
-   `python models/train_xgboost.py`. This writes the best RMSE/MAE/R² results,
-   fitted models, early-stopping details, L1/L2 and subsampling trials, feature
-   importance, train/validation overfitting diagnostics, and overall/per-station
-   learning curves under `data/processed/model_results/`.
-
-   Tune and train SVR on the same daily comparison data with
-   `python models/train_svr.py`. This writes the best RMSE/MAE/R² results,
-   fitted models, regularisation trials across C/epsilon/gamma, train/validation
-   overfitting diagnostics, and overall/per-station learning curves under
-   `data/processed/model_results/`.
-
-7. **`07_evaluation.py`** — reads `results.json` (no retraining) and prints
-   every model's RMSE / MAE / R² on **train, val and test**, for its baseline
-   and tuned stage, per grain and feature set, plus train-val and val-test
-   R² gaps and a baseline → tuned delta table. Saves CSVs and plots to
-   `data/processed/model_results/evaluation/`. Add `--trials` to see every
-   XGBoost/SVR tuning candidate.
-
-`08`–`10` remain placeholders. Decision tree, random forest, ridge, SVR,
-and XGBoost are implemented through the shared model registry. The earlier
-prototype remains in `src/_archive/models_prototype/` for reference.
-
-Each script prints a summary on completion (row counts, dropped stations,
-imputation coverage). Check this output before moving to the next step.
+`pyshp`, `holidays`, and `python-calamine` are all required —
+`01_data_ingestion.py` uses `holidays` for real NSW public-holiday dates,
+`python-calamine` to read the AQ-portal `.xls` exports, and `pyshp` for the
+optional posted-speed matching.
 
 ## Data scope
 
-15 candidate stations across NSW (not Sydney-only), 2024–2025 traffic
-data. 11 stations have usable NO2 coverage for the daily model; 8 of
-those also have hourly-resolution weather and NO2 for the hourly model.
-See `doc/Data.md` for the full station list, the AQ-site match-quality
-findings, and every data-quality decision and its justification.
+15 candidate stations across NSW (not Sydney-only), 2024–2025 traffic data.
+4 have no NO2 coverage and 2 (Port Macquarie) are excluded for data quality,
+leaving **9 stations for the daily model and 8 for hourly**. See
+`Data.md` for the full station list, AQ-site match findings, and the
+split/leakage decisions.
