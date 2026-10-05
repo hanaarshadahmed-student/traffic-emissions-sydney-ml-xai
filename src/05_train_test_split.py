@@ -13,7 +13,7 @@ Two choices here matter more than they look:
    are computed from timestamps that could land in the training set,
    letting the model implicitly see the future. A consequence of the
    global cutoff: stations whose data ends early sit entirely in train,
-   so val/test evaluate the long-running stations (see docs/Data.md).
+   so val/test evaluate the long-running stations (see data/Data.md).
 
 2. The scaler is fit on the TRAIN split ONLY, then applied unchanged to
    val/test. Fitting on the full dataset first would leak test-set

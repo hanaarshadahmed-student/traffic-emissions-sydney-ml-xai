@@ -8,6 +8,8 @@ __pycache__/
 data/raw/speed_zones/
 data/raw.zip
 data/processed/
+data/processed_pre_restructure/
 
 # fitted model files can be large; everything else in results/ is tracked
 results/saved_models/
+results/

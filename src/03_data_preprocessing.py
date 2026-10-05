@@ -4,7 +4,7 @@ CO2/NO2 Traffic-Emissions Capstone -- Stage 03: Preprocessing
 NO2 outlier report (reported, not removed), aq_quality_weight for
 REVIEW-flagged stations, train-only median imputation, redundant-column
 drops and station one-hot encoding. The reasoning behind each decision is
-in docs/Data.md ("Data-quality decisions").
+in data/Data.md ("Data-quality decisions").
 
 Input:  data/processed/preprocessed_daily.csv
         data/processed/preprocessed_hourly.csv
@@ -29,7 +29,7 @@ from scripts.split_utils import train_only_median  # noqa: E402
 IN_DIR = str(paths.PROCESSED_DIR)
 OUT_DIR = str(paths.PROCESSED_DIR)
 
-REVIEW_WEIGHT = 0.5  # judgement call -- see docs/Data.md "aq_quality_weight". Adjust and justify in your report.
+REVIEW_WEIGHT = 0.5  # judgement call -- see data/Data.md "aq_quality_weight". Adjust and justify in your report.
 
 
 def log(msg):
@@ -154,7 +154,7 @@ def finalize(df, label, time_cols):
     report_no2_outliers(df, label)
     df = add_aq_quality_weight(df, label)
     log(f"[{label}] posted_speed_kmh present: {'posted_speed_kmh' in df.columns} "
-        f"(kept as numeric feature -- see docs/Data.md \"Posted speed limit\")")
+        f"(kept as numeric feature -- see data/Data.md \"Posted speed limit\")")
     df = clean_raw_columns(df, label, time_cols)
     return df
 

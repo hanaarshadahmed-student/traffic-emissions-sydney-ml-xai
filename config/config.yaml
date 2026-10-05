@@ -1,6 +1,11 @@
 # Main project config -- edit this file, not the code, for ordinary
 # experimentation. Then run:   python run_pipeline.py
 #
+# As set here, `python run_pipeline.py` runs EVERYTHING the report needs:
+# both grains, all methods, tuning and the evaluation tables. To run less
+# for a one-off, use command-line options instead of editing this file:
+#   --stage <name>   --grain daily|hourly   --models ridge lstm ...   --no-tune
+#
 # Search spaces for hyperparameter tuning live in config/tuning.yaml.
 
 # ---------------------------------------------------------------------------
@@ -16,7 +21,9 @@
 # `--stage <name>` on the command line overrides this for a one-off.
 pipeline:
   stage: all
-  run_tuning: false   # true = `stage: all` also runs the (slow) tune stage
+  run_tuning: true    # `stage: all` includes the (slow) tune stage; --no-tune skips it
+  save_run: true      # save results + this config + log to results/runs/<run_id>/
+                      # whenever train/tune/evaluate runs (see scripts/run_record.py)
 
 # ---------------------------------------------------------------------------
 # data -- station exclusions applied in 02_cleaning.py
@@ -46,7 +53,7 @@ data:
 # ---------------------------------------------------------------------------
 # training -- what 06_run_models.py trains and how it's scored
 # ---------------------------------------------------------------------------
-# grain:          "daily" or "hourly"
+# grain:          [daily, hourly] for both (default), or just one
 # feature_sets:   which feature_manifest.json feature sets to train on,
 #                 one run each:
 #                   exogenous       traffic/weather/calendar/road/station
@@ -56,19 +63,44 @@ data:
 # split:          the split used for choosing between models -- keep "val"
 #                 while iterating; test is reported, never tuned on
 # report_splits:  every split each fitted model is scored on
-# baselines:      also score naive persistence + seasonal-climatology
-# models:         names must match scripts/models.py; enabled: false skips one
 training:
-  grain: hourly
+  grain: [daily, hourly]
   feature_sets:
     - exogenous
     - autoregressive
     - all
   split: val
   report_splits: [train, val, test]
-  baselines: true
 
+  # -------------------------------------------------------------------------
+  # A. BASELINE METHODS (not ML) -- simple rules that learn nothing from the
+  #    features; the minimum score every ML model has to beat.
+  # -------------------------------------------------------------------------
+  baselines:
+    naive_persistence: true            # B1: NO2 = the last observed value
+    naive_seasonal_climatology: true   # B2: station's train average for that month (+ hour)
+
+  # -------------------------------------------------------------------------
+  # B. ML MODELS -- names must match scripts/models.py; enabled: false skips
+  #    one. `grains: [daily]` limits a model to some grains (else: all).
+  # -------------------------------------------------------------------------
   models:
+    # 1. Ridge -- linear model; also a diagnostic (see scripts/models.py)
+    ridge:
+      enabled: true
+      params:
+        alpha: 1.0
+        random_state: 42
+
+    # 2. Decision tree
+    decision_tree:
+      enabled: true
+      params:
+        max_depth: 8
+        min_samples_leaf: 5
+        random_state: 42
+
+    # 3. Random forest
     random_forest:
       enabled: true
       params:
@@ -78,21 +110,9 @@ training:
         n_jobs: -1
         random_state: 42
 
-    decision_tree:
-      enabled: true
-      params:
-        max_depth: 8
-        min_samples_leaf: 5
-        random_state: 42
-
-    ridge:
-      enabled: true   # diagnostic baseline -- see scripts/models.py
-      params:
-        alpha: 1.0
-        random_state: 42
-
+    # 4. XGBoost
     xgboost:
-      enabled: false
+      enabled: true
       params:
         objective: reg:squarederror
         n_estimators: 500
@@ -108,11 +128,29 @@ training:
         n_jobs: -1
         random_state: 42
 
+    # 5. SVR -- daily only: kernel SVR is far too slow on ~47k hourly rows
     svr:
-      enabled: false   # very slow on the hourly grain (~66k rows)
+      enabled: true
       params:
         kernel: rbf
         C: 1.0
         epsilon: 0.1
         gamma: scale
         cache_size: 2048
+
+    # 6. LSTM -- recurrent neural network over the last `seq_len` time steps
+    #    (scripts/lstm.py; needs PyTorch). Same features and rows as the
+    #    other models; early-stops on the validation split.
+    lstm:
+      enabled: true
+      params:
+        seq_len: {daily: 14, hourly: 24}   # history window: 14 days / 24 hours
+        hidden_size: 64
+        num_layers: 1
+        dropout: 0.1
+        learning_rate: 0.001
+        weight_decay: 0.0
+        batch_size: 256
+        max_epochs: 30
+        patience: 5          # stop after this many epochs without val improvement
+        random_state: 42

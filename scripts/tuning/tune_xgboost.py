@@ -19,6 +19,7 @@ from scripts.tuning.common import (  # noqa: E402
     ROOT_DIR,
     build_candidates,
     build_learning_curves,
+    grains_to_tune,
     evaluate_generalization,
     load_config,
     save_overfitting_diagnostics,
@@ -299,18 +300,25 @@ def run_experiment(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH,
+                        help="Tuning config (search spaces).")
+    parser.add_argument("--main-config", type=Path, default=None,
+                        help="config.yaml of the pipeline run -- limits tuning to the grains "
+                             "and models that run trains.")
     args = parser.parse_args()
 
     config = load_config(args.config, "xgboost")
-    if not config.get("enabled", True):
-        print("XGBoost tuning disabled (xgboost.enabled: false in tuning.yaml) -- skipping.")
+    grains = grains_to_tune("xgboost", config, args.main_config)
+    if not grains:
+        print("XGBoost tuning skipped -- disabled in tuning.yaml, not enabled under "
+              "training.models, or none of its grains are in this run.")
         return
+    print(f"XGBoost tuning: grains {grains}, {config['n_trials']} trials per grain and feature set", flush=True)
     candidates = build_candidates(config)
     summaries = []
     trials = []
 
-    for grain in config["grains"]:
+    for grain in grains:
         for feature_set in config["feature_sets"]:
             summary, experiment_trials = run_experiment(
                 grain,

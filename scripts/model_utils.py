@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 import time
 from pathlib import Path
 
@@ -180,7 +181,7 @@ def evaluate_per_station(y_true, y_pred, station_ids: pd.Series) -> pd.DataFrame
 
 def save_per_station(
     model_name: str, grain: str, feature_set: str, split: str, per_station: pd.DataFrame,
-    stage: str = "baseline",
+    stage: str = "default",
 ) -> Path:
     """Writes one run's per-station breakdown to its own CSV (one file
     per model/grain/feature_set/split, overwritten on rerun) alongside
@@ -209,7 +210,10 @@ def evaluate(y_true, y_pred, train_seconds: float | None = None) -> dict:
 def _row_stage(row: dict) -> str:
     """Stage of a results.json row. Rows written before the `stage` column
     existed are inferred: the fine-tuning scripts always set tuned=True."""
-    return row.get("stage") or ("tuned" if row.get("tuned") else "baseline")
+    stage = row.get("stage") or ("tuned" if row.get("tuned") else "default")
+    # "baseline" was the old name for the untuned stage -- renamed to
+    # "default" so it can't be confused with the naive baseline METHODS
+    return "default" if stage == "baseline" else stage
 
 
 def save_result(
@@ -218,15 +222,19 @@ def save_result(
     feature_set: str,
     metrics: dict,
     split: str = "val",
-    stage: str = "baseline",
+    stage: str = "default",
 ) -> Path:
     """Upserts one run's metrics into results/results.json,
     keyed on (model, stage, grain, feature_set, split).
 
-    `stage` separates a model's untuned baseline run (06_run_models.py)
+    `stage` separates a model's untuned run with the config's settings
+    (stage="default", 06_run_models.py)
     from its tuned run (scripts/tuning/*), so tuning XGBoost no longer
-    overwrites the XGBoost baseline row -- both are kept, and
-    07_evaluation.py shows them side by side."""
+    overwrites the XGBoost default row -- both are kept, and
+    07_evaluation.py shows them side by side.
+
+    When run through run_pipeline.py the row also gets a `run_id`, linking
+    it to results/runs/<run_id>/ (config, manifests, log)."""
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     results_path = paths.RESULTS_PATH
     results = json.loads(results_path.read_text()) if results_path.exists() else []
@@ -241,16 +249,20 @@ def save_result(
             and r["split"] == split
         )
     ]
-    results.append(
-        {
-            "model": model_name,
-            "stage": stage,
-            "grain": grain,
-            "feature_set": feature_set,
-            "split": split,
-            **metrics,
-        }
-    )
+    row = {
+        "model": model_name,
+        "stage": stage,
+        "grain": grain,
+        "feature_set": feature_set,
+        "split": split,
+        **metrics,
+    }
+    # Tag the row with the pipeline run that wrote it (see scripts/run_record.py),
+    # so every score can be traced back to its saved config.
+    run_id = os.environ.get("PIPELINE_RUN_ID")
+    if run_id:
+        row["run_id"] = run_id
+    results.append(row)
     results_path.write_text(json.dumps(results, indent=2, default=str))
     return results_path
 

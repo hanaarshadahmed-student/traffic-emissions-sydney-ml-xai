@@ -28,6 +28,27 @@ LEARNING_CURVE_DIR = paths.LEARNING_CURVE_DIR
 OVERFITTING_DIR = paths.OVERFITTING_DIR
 
 
+def grains_to_tune(model_name: str, tuning_config: dict, main_config_path: Path | None) -> list[str]:
+    """Grains to tune this model on: the grains in tuning.yaml, limited to
+    what this pipeline run trains (training.grain in config.yaml), the
+    model's own `grains:` limit, and only if the model is enabled there.
+    Without a main config, just tuning.yaml's grains."""
+    if not tuning_config.get("enabled", True):
+        return []
+    grains = list(tuning_config["grains"])
+    if main_config_path is None:
+        return grains
+    with open(main_config_path) as file:
+        training = (yaml.safe_load(file) or {}).get("training", {})
+    model = (training.get("models") or {}).get(model_name) or {}
+    if not model.get("enabled", False):
+        return []
+    run_grains = training.get("grain", grains)
+    run_grains = list(run_grains) if isinstance(run_grains, (list, tuple)) else [run_grains]
+    allowed = model.get("grains")
+    return [g for g in grains if g in run_grains and (allowed is None or g in allowed)]
+
+
 def load_config(path: Path, model_name: str) -> dict:
     """One model's tuning config from config/tuning.yaml: the shared
     top-level settings, overridden by that model's own section."""
