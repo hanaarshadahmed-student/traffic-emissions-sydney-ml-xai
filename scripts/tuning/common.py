@@ -1,5 +1,4 @@
-"""Shared random-search, learning-curve and config utilities for the
-tuning scripts (tune_xgboost.py, tune_svr.py)."""
+"""Shared random-search, learning-curve and config utilities for the tuning scripts (tune_ridge.py, tune_xgboost.py, tune_svr.py, ...)."""
 
 from __future__ import annotations
 
@@ -22,6 +21,9 @@ from scripts.model_utils import (
     save_per_station,
     save_result,
 )
+
+# one section per tunable model in config/tuning.yaml (everything else there is shared)
+MODEL_SECTIONS = ("ridge", "decision_tree", "random_forest", "xgboost", "svr", "lstm")
 
 ROOT_DIR = paths.ROOT_DIR
 LEARNING_CURVE_DIR = paths.LEARNING_CURVE_DIR
@@ -54,7 +56,7 @@ def load_config(path: Path, model_name: str) -> dict:
     top-level settings, overridden by that model's own section."""
     with open(path) as file:
         raw = yaml.safe_load(file)
-    shared = {key: value for key, value in raw.items() if key not in ("xgboost", "svr")}
+    shared = {key: value for key, value in raw.items() if key not in MODEL_SECTIONS}
     return {**shared, **raw.get(model_name, {})}
 
 

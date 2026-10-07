@@ -279,3 +279,4 @@ def rebuild_index() -> None:
         writer = csv.DictWriter(f, fieldnames=list(rows_out[0]))
         writer.writeheader()
         writer.writerows(rows_out)
+        

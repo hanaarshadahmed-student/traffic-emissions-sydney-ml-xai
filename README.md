@@ -1,4 +1,5 @@
 # Traffic Emissions Sydney — ML + XAI
+
 Predicts **NO₂ concentration** near NSW traffic counting stations from
 traffic volume, weather and station details, then uses explainable AI
 (SHAP) to show what drives it.
@@ -100,6 +101,7 @@ They can be combined.
 | `--no-tune` | Everything except tuning (much faster) | `python run_pipeline.py --no-tune` |
 | `--grain daily` / `--grain hourly` | One grain only | `python run_pipeline.py --grain daily` |
 | `--models …` | Only these ML models (baselines always run) | `python run_pipeline.py --models ridge lstm` |
+| `--jobs N` | How many models train at the same time (default `auto` = one per 4 CPU cores, max 4). `--jobs 1` = one at a time | `python run_pipeline.py --jobs 4` |
 | `--stage …` | One stage, reusing what's already built | `python run_pipeline.py --stage evaluate` |
 | `--name …` | (Labels the saved run) | `python run_pipeline.py --name first_try` |
 | `--no-save` | (Doesn't save a run record — for quick tests) | `python run_pipeline.py --stage evaluate --no-save` |
@@ -125,7 +127,7 @@ something it needs is missing, it tells you which stage to run first.
 | `features` | `src/04_feature_engineering.py` | Builds model features and checks them |
 | `split` | `src/05_train_test_split.py` | Splits by date into train / validation / test (70/15/15) and scales features |
 | `train` | `src/06_run_models.py` | Scores the baseline methods, then trains and scores every enabled ML model, for each grain |
-| `tune` | `scripts/tuning/tune_*.py` | Hyperparameter search for XGBoost (daily + hourly) and SVR (daily) |
+| `tune` | `scripts/tuning/tune_*.py` | Hyperparameter search for Ridge, XGBoost (daily + hourly) and SVR (daily) |
 | `evaluate` | `src/07_evaluation.py` | Summary table and charts comparing every method, per grain |
 
 ## 6. The methods
@@ -178,7 +180,7 @@ are quicker than editing the config.
 | `training.models` | Turn each ML model on/off (`enabled`), limit it to some grains (`grains: [daily]`), and set its hyperparameters (`params`) |
 
 **`config/tuning.yaml`** — number of trials and the search space for
-XGBoost and SVR tuning.
+Ridge, XGBoost and SVR tuning.
 
 To try a variation without touching the main config, copy it and point the
 runner at the copy:

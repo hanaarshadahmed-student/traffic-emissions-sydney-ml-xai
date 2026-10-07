@@ -17,7 +17,7 @@ Stages (pipeline order):
     features    src/04_feature_engineering.py
     split       src/05_train_test_split.py
     train       src/06_run_models.py
-    tune        scripts/tuning/tune_xgboost.py + scripts/tuning/tune_svr.py
+    tune        scripts/tuning/tune_ridge.py + tune_xgboost.py + tune_svr.py
     evaluate    src/07_evaluation.py
 
 `--stage all` (the default) runs every stage and first empties
@@ -32,6 +32,7 @@ log (see scripts/run_record.py), and listed in results/runs/index.csv.
 Usage:
     python run_pipeline.py                          # everything
     python run_pipeline.py --no-tune                # everything except tuning
+    python run_pipeline.py --jobs 1                 # train one model at a time
     python run_pipeline.py --grain daily            # only daily data
     python run_pipeline.py --models ridge lstm      # only these ML models
     python run_pipeline.py --stage evaluate         # just one stage
@@ -94,7 +95,7 @@ STAGES = [
         "data/processed/splits/{grain}_train.csv",
         "data/processed/splits/{grain}_val.csv",
     ], True),
-    ("tune", ["scripts/tuning/tune_xgboost.py", "scripts/tuning/tune_svr.py"], "Hyperparameter tuning", [
+    ("tune", ["scripts/tuning/tune_ridge.py", "scripts/tuning/tune_xgboost.py", "scripts/tuning/tune_svr.py"], "Hyperparameter tuning", [
         "data/processed/splits/{grain}_train.csv",
         "data/processed/splits/{grain}_val.csv",
     ], False),
@@ -164,9 +165,21 @@ def apply_overrides(config: dict, args) -> tuple[dict, list[str]]:
     if args.no_tune:
         pipeline["run_tuning"] = False
         notes.append("--no-tune")
+    if args.jobs is not None:
+        pipeline["jobs"] = args.jobs
+        notes.append(f"--jobs {args.jobs}")
     grain = training.get("grain", "daily")
     training["grain"] = list(grain) if isinstance(grain, (list, tuple)) else [grain]
     return config, notes
+
+
+def resolve_jobs(config: dict) -> int:
+    """pipeline.jobs: a number, or "auto" = one parallel job per 4 CPU cores
+    (max 4, min 1)."""
+    jobs = (config.get("pipeline") or {}).get("jobs", "auto")
+    if str(jobs).lower() == "auto":
+        return max(1, min(4, (os.cpu_count() or 1) // 4))
+    return max(1, int(jobs))
 
 
 LOG: list[str] = []  # everything printed this run, saved as pipeline.log
@@ -260,6 +273,9 @@ def main() -> None:
                         help="Only these ML models, e.g. --models ridge lstm (baselines always run).")
     parser.add_argument("--no-tune", action="store_true",
                         help="Skip the (slow) tune stage when running all stages.")
+    parser.add_argument("--jobs", type=int, default=None,
+                        help="How many models to train at the same time (default: pipeline.jobs in the "
+                             "config, normally auto = one per 4 CPU cores, max 4). --jobs 1 = one at a time.")
     parser.add_argument("--name", help="Short label added to the saved run's folder name.")
     parser.add_argument("--no-save", action="store_true",
                         help="Don't save a run record to results/runs/.")
@@ -294,12 +310,13 @@ def main() -> None:
     else:
         say(f"Running SINGLE stage: {stage!r}, grains {grains}"
             + (f", overrides: {' '.join(overrides)}" if overrides else ""))
+    say(f"Training {resolve_jobs(config)} model(s) at a time (pipeline.jobs / --jobs)")
     if save:
         say(f"Run id: {run_id}")
 
     stage_args = {
         "clean": ["--config", str(effective_path)],
-        "train": ["--config", str(effective_path)],
+        "train": ["--config", str(effective_path), "--jobs", str(resolve_jobs(config))],
         "tune": ["--main-config", str(effective_path)],
         "evaluate": ["--grain", grains[0]] if len(grains) == 1 else [],
     }

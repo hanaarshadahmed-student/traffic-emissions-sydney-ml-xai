@@ -22,6 +22,8 @@
 pipeline:
   stage: all
   run_tuning: true    # `stage: all` includes the (slow) tune stage; --no-tune skips it
+  jobs: auto          # models trained at the same time: a number, or auto =
+                      # one per 4 CPU cores (max 4). 1 = one at a time.
   save_run: true      # save results + this config + log to results/runs/<run_id>/
                       # whenever train/tune/evaluate runs (see scripts/run_record.py)
 
@@ -131,6 +133,7 @@ training:
     # 5. SVR -- daily only: kernel SVR is far too slow on ~47k hourly rows
     svr:
       enabled: true
+      grains: [daily]
       params:
         kernel: rbf
         C: 1.0

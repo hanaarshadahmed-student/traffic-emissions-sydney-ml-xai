@@ -31,11 +31,22 @@ entirely: see scripts/models.py.
 Usage:
     python src/06_run_models.py
     python src/06_run_models.py --config config/my_experiment.yaml
+    python src/06_run_models.py --jobs 4      # 4 models training at once
+
+--jobs N trains N (model, grain, feature set) combinations at the same time
+in separate processes -- much faster on a many-core computer, and the
+results are identical. Each worker gets cpu_count // N threads for its own
+parallel parts (random forest, XGBoost, PyTorch), so the cores aren't
+oversubscribed. The default (--jobs 1) trains one at a time and prints the
+LSTM's epoch-by-epoch progress.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import get_context
 from pathlib import Path
 
 import numpy as np
@@ -218,15 +229,10 @@ def model_grains(model_config: dict, all_grains: list[str]) -> list[str]:
     return [g for g in all_grains if allowed is None or g in allowed]
 
 
-def run_grain(grain: str, config: dict, worst_stations: int) -> bool:
+def run_baseline_methods(grain: str, config: dict) -> None:
     feature_sets = config["feature_sets"]
     split = config.get("split", "val")
-    # Every split the fitted model gets scored on and saved for. Choices
-    # should still be made on `split` (val) only -- test is reported, not
-    # tuned on.
     report_splits = config.get("report_splits", ["train", "val", "test"])
-
-    # --- A. baseline methods --------------------------------------------
     baselines = config.get("baselines", True)
     if isinstance(baselines, dict):  # {naive_persistence: true, ...}
         enabled_baselines = [b for b in BASELINE_METHODS if baselines.get(b, False)]
@@ -235,51 +241,79 @@ def run_grain(grain: str, config: dict, worst_stations: int) -> bool:
 
     print(f"\n{'#' * 70}\n# {grain.upper()} data\n{'#' * 70}")
     print(f"\n=== A. Baseline methods (not ML) -- {grain} ===")
-    if enabled_baselines:
-        baseline_results = run_baselines(
-            grain, feature_sets, list(dict.fromkeys([*report_splits, split])), enabled_baselines
-        )
-        for name in enabled_baselines:
-            r2s = "  ".join(
-                f"{sp}_R2={m['r2']:.4f}" for (n, sp), m in baseline_results.items() if n == name
-            )
-            print(f"{display_name(name):26s} | {grain} | (no features)  | {r2s}")
-    else:
+    if not enabled_baselines:
         print("  (none enabled under training.baselines)")
+        return
+    baseline_results = run_baselines(
+        grain, feature_sets, list(dict.fromkeys([*report_splits, split])), enabled_baselines
+    )
+    for name in enabled_baselines:
+        r2s = "  ".join(
+            f"{sp}_R2={m['r2']:.4f}" for (n, sp), m in baseline_results.items() if n == name
+        )
+        print(f"{display_name(name):26s} | {grain} | (no features)  | {r2s}")
 
-    # --- B. ML models ----------------------------------------------------
-    print(f"\n=== B. ML models -- {grain} ===")
-    ran_any = False
-    for name, model_config in config["models"].items():
-        model_config = model_config or {}
-        if not model_config.get("enabled", False):
-            continue
-        if grain not in model_grains(model_config, [grain]):
-            print(f"{display_name(name):26s} | {grain} | skipped (grains: {model_config.get('grains')})")
-            continue
-        params = model_config.get("params") or {}
-        for feature_set in feature_sets:
-            results = run_one(name, params, grain, feature_set, split, report_splits)
-            ran_any = True
-            metrics, per_station = results[split]
-            weight_tag = "w" if metrics["sample_weighted"] else " "
-            r2_by_split = "  ".join(
-                f"{s}_R2={m['r2']:.4f}" for s, (m, _) in results.items()
+
+# Rough relative cost of each model, so the slowest start first when
+# several run at once (hourly is ~18x bigger than daily).
+_COST = {"lstm": 6, "svr": 5, "random_forest": 3, "xgboost": 2, "decision_tree": 1, "ridge": 1}
+
+
+def collect_tasks(config: dict) -> list[tuple[str, dict, str, str]]:
+    """Every (model, params, grain, feature_set) to train, in config order."""
+    tasks = []
+    for grain in grains_from(config):
+        for name, model_config in config["models"].items():
+            model_config = model_config or {}
+            if not model_config.get("enabled", False):
+                continue
+            if grain not in model_grains(model_config, [grain]):
+                print(f"{display_name(name):26s} | {grain} | skipped (grains: {model_config.get('grains')})")
+                continue
+            for feature_set in config["feature_sets"]:
+                tasks.append((name, model_config.get("params") or {}, grain, feature_set))
+    return tasks
+
+
+def params_for_worker(params: dict, threads: int | None) -> dict:
+    """With --jobs > 1, give each worker its share of the cores and keep the
+    LSTM quiet (epoch lines from several models would interleave)."""
+    if threads is None:
+        return params
+    params = dict(params)
+    if "n_jobs" in params:
+        params["n_jobs"] = threads
+    if "seq_len" in params:  # the LSTM
+        params["num_threads"] = threads
+        params["verbose"] = False
+    return params
+
+
+def run_task(task, split, report_splits, threads):
+    """One model x grain x feature set (runs in a worker process)."""
+    name, params, grain, feature_set = task
+    results = run_one(name, params_for_worker(params, threads), grain, feature_set, split, report_splits)
+    return task, results
+
+
+def print_result(task, results, split, worst_stations) -> None:
+    name, _, grain, feature_set = task
+    metrics, per_station = results[split]
+    weight_tag = "w" if metrics["sample_weighted"] else " "
+    r2_by_split = "  ".join(f"{s}_R2={m['r2']:.4f}" for s, (m, _) in results.items())
+    print(
+        f"{display_name(name):26s} | {grain} | {feature_set:14s} | [{weight_tag}] "
+        f"{split} RMSE={metrics['rmse']:.4f}  MAE={metrics['mae']:.4f}  "
+        f"| {r2_by_split}  ({metrics['train_seconds']}s)",
+        flush=True,
+    )
+    if worst_stations > 0:
+        worst = per_station.dropna(subset=["r2"]).head(worst_stations)
+        if len(worst):
+            tags = " | ".join(
+                f"{row.station_id} n={row.n_rows} R2={row.r2:.2f}" for row in worst.itertuples()
             )
-            print(
-                f"{display_name(name):26s} | {grain} | {feature_set:14s} | [{weight_tag}] "
-                f"{split} RMSE={metrics['rmse']:.4f}  MAE={metrics['mae']:.4f}  "
-                f"| {r2_by_split}  ({metrics['train_seconds']}s)"
-            )
-            if worst_stations > 0:
-                worst = per_station.dropna(subset=["r2"]).head(worst_stations)
-                if len(worst):
-                    tags = " | ".join(
-                        f"{row.station_id} n={row.n_rows} R2={row.r2:.2f}"
-                        for row in worst.itertuples()
-                    )
-                    print(f"{'':26s}   worst stations ({split}): {tags}")
-    return ran_any
+            print(f"{'':26s}   worst stations ({split}): {tags}", flush=True)
 
 
 def main():
@@ -291,16 +325,48 @@ def main():
              "Full breakdown is always saved to "
              "results/per_station/ regardless.",
     )
+    parser.add_argument(
+        "--jobs", type=int, default=1,
+        help="How many models to train at the same time (default 1). Try 4 on a "
+             "16-core computer. Results are the same, just faster.",
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
-    ran_any = False
-    for grain in grains_from(config):
-        ran_any = run_grain(grain, config, args.worst_stations) or ran_any
+    split = config.get("split", "val")
+    report_splits = config.get("report_splits", ["train", "val", "test"])
 
-    if not ran_any:
+    for grain in grains_from(config):
+        run_baseline_methods(grain, config)
+
+    print("\n=== B. ML models ===")
+    tasks = collect_tasks(config)
+    if not tasks:
         print("No ML models ran -- set enabled: true for at least one "
               f"model under training.models in {args.config}")
+        return
+
+    jobs = max(1, min(args.jobs, len(tasks)))
+    if jobs == 1:
+        for task in tasks:
+            _, results = run_task(task, split, report_splits, None)
+            print_result(task, results, split, args.worst_stations)
+        return
+
+    threads = max(1, (os.cpu_count() or 1) // jobs)
+    tasks.sort(key=lambda t: _COST.get(t[0], 1) * (18 if t[2] == "hourly" else 1), reverse=True)
+    print(f"Training {len(tasks)} models, {jobs} at a time, {threads} CPU threads each "
+          f"(slowest first, so results appear out of order)\n", flush=True)
+    with ProcessPoolExecutor(max_workers=jobs, mp_context=get_context("spawn")) as pool:
+        futures = [pool.submit(run_task, t, split, report_splits, threads) for t in tasks]
+        try:
+            for future in as_completed(futures):
+                task, results = future.result()
+                print_result(task, results, split, args.worst_stations)
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            raise
 
 
 if __name__ == "__main__":

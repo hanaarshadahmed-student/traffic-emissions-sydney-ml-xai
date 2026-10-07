@@ -22,6 +22,7 @@ Usage:
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 import json
 import os
@@ -216,6 +217,31 @@ def _row_stage(row: dict) -> str:
     return "default" if stage == "baseline" else stage
 
 
+@contextlib.contextmanager
+def _results_lock(timeout: float = 120.0):
+    """Only one process at a time may update results.json. Needed when
+    06_run_models.py trains several models in parallel (--jobs): without
+    it two workers could read the file together and one would overwrite
+    the other's rows. A leftover lock from a crashed run is ignored after
+    `timeout` seconds."""
+    lock_path = paths.RESULTS_PATH.with_suffix(".json.lock")
+    start = time.time()
+    while True:
+        try:
+            handle = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(handle)
+            break
+        except FileExistsError:
+            if time.time() - start > timeout:
+                lock_path.unlink(missing_ok=True)  # stale lock
+                continue
+            time.sleep(0.05)
+    try:
+        yield
+    finally:
+        lock_path.unlink(missing_ok=True)
+
+
 def save_result(
     model_name: str,
     grain: str,
@@ -237,18 +263,6 @@ def save_result(
     it to results/runs/<run_id>/ (config, manifests, log)."""
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     results_path = paths.RESULTS_PATH
-    results = json.loads(results_path.read_text()) if results_path.exists() else []
-    results = [
-        r
-        for r in results
-        if not (
-            r["model"] == model_name
-            and _row_stage(r) == stage
-            and r["grain"] == grain
-            and r["feature_set"] == feature_set
-            and r["split"] == split
-        )
-    ]
     row = {
         "model": model_name,
         "stage": stage,
@@ -262,8 +276,23 @@ def save_result(
     run_id = os.environ.get("PIPELINE_RUN_ID")
     if run_id:
         row["run_id"] = run_id
-    results.append(row)
-    results_path.write_text(json.dumps(results, indent=2, default=str))
+    with _results_lock():
+        results = json.loads(results_path.read_text()) if results_path.exists() else []
+        results = [
+            r
+            for r in results
+            if not (
+                r["model"] == model_name
+                and _row_stage(r) == stage
+                and r["grain"] == grain
+                and r["feature_set"] == feature_set
+                and r["split"] == split
+            )
+        ]
+        results.append(row)
+        temp_path = results_path.with_suffix(f".json.tmp{os.getpid()}")
+        temp_path.write_text(json.dumps(results, indent=2, default=str))
+        os.replace(temp_path, results_path)
     return results_path
 
 

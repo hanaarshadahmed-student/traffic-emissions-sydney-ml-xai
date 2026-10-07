@@ -9,6 +9,7 @@ from pathlib import Path
 
 import joblib
 import pandas as pd
+from joblib import Parallel, delayed
 
 # Run as a script (python scripts/tuning/tune_svr.py), so put the repo
 # root on the import path to reach the shared code in scripts/.
@@ -170,8 +171,10 @@ def run_experiment(
     best_run = None
     tuning_start = time.perf_counter()
 
-    for trial_number, params in enumerate(candidates, start=1):
-        model, predictions, metrics, model_params = train_candidate(
+    # SVR fits on one core, but the candidates don't depend on each other,
+    # so they're fitted side by side (n_jobs in tuning.yaml; -1 = all cores).
+    fitted = Parallel(n_jobs=config.get("n_jobs", -1))(
+        delayed(train_candidate)(
             params,
             config["fixed_params"],
             X_train,
@@ -181,6 +184,12 @@ def run_experiment(
             y_val,
             config["overfitting_thresholds"],
         )
+        for params in candidates
+    )
+
+    for trial_number, (params, (model, predictions, metrics, model_params)) in enumerate(
+        zip(candidates, fitted), start=1
+    ):
         trial = {
             "grain": grain,
             "feature_set": feature_set,
