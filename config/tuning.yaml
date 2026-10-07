@@ -1,5 +1,6 @@
 # Hyperparameter tuning config -- read by the scripts in scripts/tuning/
-# (tune_ridge.py, tune_xgboost.py, tune_svr.py): the `tune` stage of
+# (tune_ridge.py, tune_decision_tree.py, tune_random_forest.py, tune_lstm.py,
+# tune_xgboost.py, tune_svr.py): the `tune` stage of
 # run_pipeline.py. One section per model below; add a new model by adding a
 # section here and a tune_<model>.py script.
 #
@@ -35,6 +36,79 @@ ridge:
   required_candidates: []
   search_space:
     alpha: [0.001, 0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0, 200.0, 300.0, 500.0, 1000.0, 2000.0, 3000.0, 5000.0, 10000.0, 30000.0, 100000.0]
+
+# ---------------------------------------------------------------------------
+# Decision tree -- all four settings limit overfitting. `null` max_depth =
+# grow until the other limits stop it. Candidates are fitted side by side.
+# ---------------------------------------------------------------------------
+decision_tree:
+  enabled: true
+  grains: [daily, hourly]
+  n_trials: 30
+  n_jobs: -1
+  fixed_params: {random_state: 42}
+  baseline_params: {max_depth: 8, min_samples_leaf: 5, min_samples_split: 2, ccp_alpha: 0.0}
+  required_candidates:
+  - {max_depth: 4, min_samples_leaf: 20, min_samples_split: 2, ccp_alpha: 0.0}
+  - {max_depth: 6, min_samples_leaf: 10, min_samples_split: 2, ccp_alpha: 0.0}
+  - {max_depth: 10, min_samples_leaf: 20, min_samples_split: 2, ccp_alpha: 0.0}
+  - {max_depth: 12, min_samples_leaf: 50, min_samples_split: 2, ccp_alpha: 0.0}
+  - {max_depth: null, min_samples_leaf: 20, min_samples_split: 2, ccp_alpha: 0.0001}
+  search_space:
+    max_depth: [3, 4, 5, 6, 8, 10, 12, 16, null]
+    min_samples_leaf: [1, 2, 5, 10, 20, 50, 100]
+    min_samples_split: [2, 10, 30]
+    ccp_alpha: [0.0, 0.00001, 0.0001, 0.001]
+
+# ---------------------------------------------------------------------------
+# Random forest -- the slow one to tune: an hourly forest takes about a minute
+# to fit, so 12 trials x 3 feature sets is roughly 30-40 minutes for hourly.
+# Lower n_trials (or run `--grain daily`) while experimenting.
+# ---------------------------------------------------------------------------
+random_forest:
+  enabled: true
+  grains: [daily, hourly]
+  n_trials: 12
+  fixed_params: {n_jobs: -1, random_state: 42}
+  baseline_params: {n_estimators: 300, max_depth: null, min_samples_leaf: 5, max_features: 1.0}
+  required_candidates:
+  - {n_estimators: 300, max_depth: 12, min_samples_leaf: 10, max_features: 0.5}
+  - {n_estimators: 300, max_depth: 16, min_samples_leaf: 5, max_features: 0.33}
+  - {n_estimators: 500, max_depth: null, min_samples_leaf: 10, max_features: 0.33}
+  search_space:
+    n_estimators: [200, 300, 500]
+    max_depth: [8, 12, 16, 24, null]
+    min_samples_leaf: [2, 5, 10, 20]
+    max_features: [1.0, 0.5, 0.33, sqrt]
+
+# ---------------------------------------------------------------------------
+# LSTM -- the slowest to tune: every trial trains a whole network. An hourly
+# trial takes roughly 1-2 minutes, so 10 trials x 3 feature sets is about an
+# hour for hourly. Lower n_trials (or run `--grain daily`) while experimenting.
+# `window` = how much history the LSTM sees, translated per grain below.
+# max_epochs / patience are taken from config.yaml (training.models.lstm).
+# ---------------------------------------------------------------------------
+lstm:
+  enabled: true
+  grains: [daily, hourly]
+  n_trials: 10
+  fixed_params: {random_state: 42}
+  window_lengths:
+    daily: {short: 7, medium: 14, long: 28}
+    hourly: {short: 12, medium: 24, long: 48}
+  baseline_params: {window: medium, hidden_size: 64, num_layers: 1, dropout: 0.1, learning_rate: 0.001, batch_size: 256, weight_decay: 0.0}
+  required_candidates:
+  - {window: medium, hidden_size: 128, num_layers: 1, dropout: 0.1, learning_rate: 0.001, batch_size: 256, weight_decay: 0.0}
+  - {window: long, hidden_size: 64, num_layers: 1, dropout: 0.1, learning_rate: 0.001, batch_size: 256, weight_decay: 0.0}
+  - {window: medium, hidden_size: 64, num_layers: 2, dropout: 0.2, learning_rate: 0.001, batch_size: 256, weight_decay: 0.0}
+  search_space:
+    window: [short, medium, long]
+    hidden_size: [32, 64, 128]
+    num_layers: [1, 2]
+    dropout: [0.0, 0.1, 0.3]
+    learning_rate: [0.0005, 0.001, 0.002]
+    batch_size: [128, 256, 512]
+    weight_decay: [0.0, 0.00001, 0.0001]
 
 # ---------------------------------------------------------------------------
 # XGBoost -- early stopping on the validation split

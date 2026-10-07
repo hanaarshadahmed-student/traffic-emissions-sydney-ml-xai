@@ -1,4 +1,5 @@
-"""Shared random-search, learning-curve and config utilities for the tuning scripts (tune_ridge.py, tune_xgboost.py, tune_svr.py, ...)."""
+"""Shared random-search, learning-curve and config utilities for the
+tuning scripts (tune_ridge.py, tune_xgboost.py, tune_svr.py, ...)."""
 
 from __future__ import annotations
 
@@ -6,7 +7,14 @@ import math
 from collections.abc import Callable
 from pathlib import Path
 
-import matplotlib.pyplot as plt
+import matplotlib
+
+# Draw charts straight to files, with no window. Without this, Windows picks the
+# Tk window backend, and when the random forest's worker threads later clean up
+# the figures Python aborts with "Tcl_AsyncDelete: async handler deleted by the
+# wrong thread" (seen in the middle of random forest tuning).
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np
 import pandas as pd
 import yaml

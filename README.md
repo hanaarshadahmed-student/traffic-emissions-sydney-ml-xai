@@ -127,7 +127,7 @@ something it needs is missing, it tells you which stage to run first.
 | `features` | `src/04_feature_engineering.py` | Builds model features and checks them |
 | `split` | `src/05_train_test_split.py` | Splits by date into train / validation / test (70/15/15) and scales features |
 | `train` | `src/06_run_models.py` | Scores the baseline methods, then trains and scores every enabled ML model, for each grain |
-| `tune` | `scripts/tuning/tune_*.py` | Hyperparameter search for Ridge, XGBoost (daily + hourly) and SVR (daily) |
+| `tune` | `scripts/tuning/tune_*.py` | Hyperparameter search for Ridge, decision tree, random forest, LSTM, XGBoost and SVR (daily only) — the LSTM and random forest are the slow ones |
 | `evaluate` | `src/07_evaluation.py` | Summary table and charts comparing every method, per grain |
 
 ## 6. The methods
@@ -180,7 +180,7 @@ are quicker than editing the config.
 | `training.models` | Turn each ML model on/off (`enabled`), limit it to some grains (`grains: [daily]`), and set its hyperparameters (`params`) |
 
 **`config/tuning.yaml`** — number of trials and the search space for
-Ridge, XGBoost and SVR tuning.
+Ridge, decision tree, random forest, LSTM, XGBoost and SVR tuning.
 
 To try a variation without touching the main config, copy it and point the
 runner at the copy:

@@ -17,7 +17,7 @@ Stages (pipeline order):
     features    src/04_feature_engineering.py
     split       src/05_train_test_split.py
     train       src/06_run_models.py
-    tune        scripts/tuning/tune_ridge.py + tune_xgboost.py + tune_svr.py
+    tune        scripts/tuning/tune_ridge.py + tune_decision_tree.py + tune_random_forest.py + tune_lstm.py + tune_xgboost.py + tune_svr.py
     evaluate    src/07_evaluation.py
 
 `--stage all` (the default) runs every stage and first empties
@@ -95,7 +95,7 @@ STAGES = [
         "data/processed/splits/{grain}_train.csv",
         "data/processed/splits/{grain}_val.csv",
     ], True),
-    ("tune", ["scripts/tuning/tune_ridge.py", "scripts/tuning/tune_xgboost.py", "scripts/tuning/tune_svr.py"], "Hyperparameter tuning", [
+    ("tune", ["scripts/tuning/tune_ridge.py", "scripts/tuning/tune_decision_tree.py", "scripts/tuning/tune_random_forest.py", "scripts/tuning/tune_lstm.py", "scripts/tuning/tune_xgboost.py", "scripts/tuning/tune_svr.py"], "Hyperparameter tuning", [
         "data/processed/splits/{grain}_train.csv",
         "data/processed/splits/{grain}_val.csv",
     ], False),
