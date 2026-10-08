@@ -158,6 +158,24 @@ training:
         patience: 5          # stop after this many epochs without val improvement
         random_state: 42
 
+    # 7. GRU -- lighter recurrent alternative to LSTM for hourly sequences
+    gru:
+      enabled: true
+      grains: [hourly]
+      params:
+        seq_len: {hourly: 24}
+        hidden_size: 64
+        num_layers: 1
+        dropout: 0.1
+        learning_rate: 0.001
+        weight_decay: 0.0
+        batch_size: 256
+        max_epochs: 30
+        patience: 5
+        gradient_clip: 1.0
+        num_threads: 1
+        random_state: 42
+
 # ---------------------------------------------------------------------------
 # explainability -- SHAP on the XGBoost model (stage 08, results/shap/)
 # ---------------------------------------------------------------------------

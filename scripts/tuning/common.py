@@ -31,7 +31,7 @@ from scripts.model_utils import (
 )
 
 # one section per tunable model in config/tuning.yaml (everything else there is shared)
-MODEL_SECTIONS = ("ridge", "decision_tree", "random_forest", "xgboost", "svr", "lstm")
+MODEL_SECTIONS = ("ridge", "decision_tree", "random_forest", "xgboost", "svr", "lstm", "gru")
 
 ROOT_DIR = paths.ROOT_DIR
 LEARNING_CURVE_DIR = paths.LEARNING_CURVE_DIR

@@ -54,7 +54,7 @@ RUN_ID_ENV = "PIPELINE_RUN_ID"
 RUNS_DIR = paths.RESULTS_DIR / "runs"
 INDEX_PATH = RUNS_DIR / "index.csv"
 
-PACKAGES = ["pandas", "numpy", "scikit-learn", "xgboost", "scipy", "holidays",
+PACKAGES = ["pandas", "numpy", "scikit-learn", "xgboost", "torch", "scipy", "holidays",
             "python-calamine", "pyshp", "pyyaml", "matplotlib"]
 
 # results/ files that belong to a run's manifests (copied from processed/)
@@ -279,4 +279,3 @@ def rebuild_index() -> None:
         writer = csv.DictWriter(f, fieldnames=list(rows_out[0]))
         writer.writeheader()
         writer.writerows(rows_out)
-        

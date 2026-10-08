@@ -12,7 +12,7 @@ config/config.yaml:
 
   B. ML MODELS (training.models, defined in scripts/models.py):
        1. ridge  2. decision_tree  3. random_forest  4. xgboost  5. svr
-       6. lstm (sequence model -- scripts/lstm.py)
+       6. lstm  7. gru (sequence models -- scripts/lstm.py / scripts/gru.py)
 
 Every ML model is trained on the train split once per feature set and
 scored on every split in report_splits, the exact same way -- that logic
@@ -133,7 +133,7 @@ def run_one(
 
 
 def run_sequence_model(name, model, grain, feature_set, split, eval_splits) -> dict:
-    """Models that read a window of past time steps (the LSTM). Same feature
+    """Models that read a window of past time steps (LSTM and GRU). Same feature
     columns, rows, weights and scoring as the tabular models -- only the
     input shape differs. See scripts/lstm.py."""
     from scripts.lstm import build_sequences
@@ -256,7 +256,7 @@ def run_baseline_methods(grain: str, config: dict) -> None:
 
 # Rough relative cost of each model, so the slowest start first when
 # several run at once (hourly is ~18x bigger than daily).
-_COST = {"lstm": 6, "svr": 5, "random_forest": 3, "xgboost": 2, "decision_tree": 1, "ridge": 1}
+_COST = {"lstm": 6, "gru": 6, "svr": 5, "random_forest": 3, "xgboost": 2, "decision_tree": 1, "ridge": 1}
 
 
 def collect_tasks(config: dict) -> list[tuple[str, dict, str, str]]:
@@ -277,14 +277,15 @@ def collect_tasks(config: dict) -> list[tuple[str, dict, str, str]]:
 
 def params_for_worker(params: dict, threads: int | None) -> dict:
     """With --jobs > 1, give each worker its share of the cores and keep the
-    LSTM quiet (epoch lines from several models would interleave)."""
+    sequence models quiet (epoch lines from several models would interleave)."""
     if threads is None:
         return params
     params = dict(params)
     if "n_jobs" in params:
         params["n_jobs"] = threads
-    if "seq_len" in params:  # the LSTM
-        params["num_threads"] = threads
+    if "seq_len" in params:
+        configured_threads = int(params.get("num_threads") or threads)
+        params["num_threads"] = min(threads, configured_threads)
         params["verbose"] = False
     return params
 

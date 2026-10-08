@@ -7,7 +7,8 @@ compares every method, grouped by type:
   Baseline methods (not ML -- the bar to beat)
       B1 Persistence, B2 Seasonal climatology
   ML models
-      1 Ridge, 2 Decision tree, 3 Random forest, 4 XGBoost, 5 SVR, 6 LSTM
+      1 Ridge, 2 Decision tree, 3 Random forest, 4 XGBoost, 5 SVR, 6 LSTM,
+      7 GRU
       (each as "default" = config.yaml settings, and "tuned" once tuned)
 
 What it prints (per grain):
@@ -294,7 +295,7 @@ def main() -> None:
         print(f"\n{'=' * 90}\n{grain.upper()} -- R² by method   "
               f"(choose on val, report test once; higher is better)\n{'=' * 90}")
         print(summary.to_string(float_format=fmt, na_rep="-"))
-        print("\n  baseline = not ML (the bar to beat)    ML = models 1-6    '-' = not run yet")
+        print("\n  baseline = not ML (the bar to beat)    ML = models 1-7    '-' = not run yet")
 
         if args.detail:
             print(f"\n--- {grain} detail: train / val / test, one block per method ---")

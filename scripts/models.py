@@ -12,6 +12,8 @@ The project compares two kinds of method:
       5. svr             support vector regression (RBF kernel)
       6. lstm            recurrent neural network over a window of recent
                          time steps (scripts/lstm.py, needs PyTorch)
+      7. gru             gated recurrent unit network over hourly sequences
+                         (scripts/gru.py, needs PyTorch)
 
   BASELINE METHODS (not ML -- defined in src/06_run_models.py, switched
   on/off under training.baselines in config/config.yaml):
@@ -29,8 +31,8 @@ To add a model:
   1. Import its class below and add one line to REGISTRY.
   2. Add a matching block under training.models in config/config.yaml.
 Any scikit-learn-compatible estimator (.fit()/.predict()) works. A model
-that needs sequences of time steps instead of single rows (like the LSTM)
-sets `needs_sequences = True`; see scripts/lstm.py.
+that needs sequences of time steps instead of single rows (LSTM or GRU)
+sets `needs_sequences = True`; see scripts/lstm.py and scripts/gru.py.
 
 Notes on individual models:
   ridge -- also a diagnostic. If the trees score a negative R2 on the
@@ -58,6 +60,11 @@ def _lstm(**params):
     return LSTMRegressor(**params)
 
 
+def _gru(**params):
+    from scripts.gru import GRURegressor
+    return GRURegressor(**params)
+
+
 REGISTRY = {
     "ridge": Ridge,
     "decision_tree": DecisionTreeRegressor,
@@ -65,6 +72,7 @@ REGISTRY = {
     "xgboost": XGBRegressor,
     "svr": SVR,
     "lstm": _lstm,
+    "gru": _gru,
 }
 
 # Not ML -- computed directly in src/06_run_models.py (see the docstring above).
@@ -81,6 +89,7 @@ DISPLAY_NAMES = {
     "xgboost": "4 XGBoost",
     "svr": "5 SVR",
     "lstm": "6 LSTM",
+    "gru": "7 GRU",
 }
 
 

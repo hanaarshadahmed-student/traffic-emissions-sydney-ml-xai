@@ -79,7 +79,7 @@ python run_pipeline.py
 **This one command runs everything the report needs:** it builds the data,
 scores the baseline methods, trains every ML model on **both daily and
 hourly** data, tunes, and makes the summary tables and charts. Expect it
-to take a while (the LSTM and the tuning are the slow parts; expect anywhere from tens of minutes to a few hours depending on your laptop). It prints progress as it goes and a
+to take a while (the recurrent models and tuning are the slow parts; expect anywhere from tens of minutes to a few hours depending on your laptop). It prints progress as it goes and a
 timing summary at the end.
 
 **To stop a run, press Ctrl+C once.** The runner stops the current stage
@@ -127,7 +127,7 @@ something it needs is missing, it tells you which stage to run first.
 | `features` | `src/04_feature_engineering.py` | Builds model features and checks them |
 | `split` | `src/05_train_test_split.py` | Splits by date into train / validation / test (70/15/15) and scales features |
 | `train` | `src/06_run_models.py` | Scores the baseline methods, then trains and scores every enabled ML model, for each grain |
-| `tune` | `scripts/tuning/tune_*.py` | Hyperparameter search for Ridge, decision tree, random forest, LSTM, XGBoost and SVR (daily only) — the LSTM and random forest are the slow ones |
+| `tune` | `scripts/tuning/tune_*.py` | Hyperparameter search for Ridge, decision tree, random forest, LSTM, GRU, XGBoost and SVR (daily only) — the recurrent models and random forest are the slow ones |
 | `evaluate` | `src/07_evaluation.py` | Summary table and charts comparing every method, per grain |
 | `explain` | `src/08_explainability.py` | SHAP on the tuned XGBoost: which features push NO₂ up or down, in `results/shap/` |
 
@@ -146,6 +146,7 @@ this order:
 | 4 | XGBoost | ML — boosted trees | On |
 | 5 | SVR | ML — kernel | On, daily only (far too slow on hourly data) |
 | 6 | LSTM | ML — neural network | On |
+| 7 | GRU | ML — recurrent neural network | On, hourly only |
 
 The **baselines** learn nothing from the features — they're the score an
 ML model has to beat to show it has learned something. Each **ML model** is
@@ -159,8 +160,13 @@ training when the validation score stops improving. It needs PyTorch,
 which is in `requirements.txt`. Its settings are under
 `training.models.lstm` in `config.yaml`; see `scripts/lstm.py` for details.
 
+The **GRU** uses the same hourly sequences and validation procedure as the
+LSTM with a lighter recurrent cell. Its settings are under
+`training.models.gru` in `config.yaml`; see `scripts/gru.py` for details.
+
 Results are labelled **default** (the settings in `config.yaml`) or
-**tuned** (after the tune stage). Tuning currently covers XGBoost and SVR.
+**tuned** (after the tune stage). Every registered ML model has a matching
+tuning script.
 
 ## 7. Change what runs
 
@@ -181,7 +187,7 @@ are quicker than editing the config.
 | `training.models` | Turn each ML model on/off (`enabled`), limit it to some grains (`grains: [daily]`), and set its hyperparameters (`params`) |
 
 **`config/tuning.yaml`** — number of trials and the search space for
-Ridge, decision tree, random forest, LSTM, XGBoost and SVR tuning.
+Ridge, decision tree, random forest, LSTM, GRU, XGBoost and SVR tuning.
 
 To try a variation without touching the main config, copy it and point the
 runner at the copy:
@@ -200,7 +206,7 @@ python run_pipeline.py --config config/my_experiment.yaml
 | `results/evaluation/summary_<grain>.png` / `.csv` | **Start here** — validation and test R² for every method and feature set |
 | `results/evaluation/train_val_test_<grain>.*` | The full table: RMSE / MAE / R² on train, val and test, grouped by method |
 | `results/tuning/` | Tuning trials, learning curves, overfitting checks, feature importance |
-| `results/saved_models/` | Fitted tuned models (`.joblib`, not committed to git) |
+| `results/saved_models/` | Fitted tuned models (`.joblib` / `.pt`, not committed to git) |
 | `results/runs/` | A saved copy of every run with its config — see step 9 |
 
 The evaluate stage prints one summary table per grain (one row per method).
@@ -294,7 +300,7 @@ data/
   processed/     intermediate files, rebuilt each run
 notebooks/       01_data_exploration.ipynb — exploratory analysis
 results/         scores, tables, charts, tuning outputs, saved runs
-scripts/         shared code: paths, model registry (models.py), LSTM (lstm.py),
+scripts/         shared code: paths, model registry, LSTM, GRU,
                  helpers, run records, tuning
 src/             the pipeline stages, 01 to 08
 run_pipeline.py  runs everything
