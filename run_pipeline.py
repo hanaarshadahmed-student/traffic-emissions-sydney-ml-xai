@@ -7,7 +7,7 @@ The one command for the whole project:
 
 runs EVERYTHING the report needs, as set in config/config.yaml: builds the
 data, trains every enabled method on every grain (daily and hourly), tunes,
-and makes the evaluation tables and charts. Options are only for running
+and makes the evaluation tables and charts, and explains the best model with SHAP. Options are only for running
 LESS -- e.g. one stage, one grain, a few models, or no tuning.
 
 Stages (pipeline order):
@@ -19,6 +19,7 @@ Stages (pipeline order):
     train       src/06_run_models.py
     tune        scripts/tuning/tune_ridge.py + tune_decision_tree.py + tune_random_forest.py + tune_lstm.py + tune_xgboost.py + tune_svr.py
     evaluate    src/07_evaluation.py
+    explain     src/08_explainability.py   (SHAP on the tuned XGBoost)
 
 `--stage all` (the default) runs every stage and first empties
 data/processed/ so a run never mixes with a stale one. results/ is never
@@ -36,6 +37,7 @@ Usage:
     python run_pipeline.py --grain daily            # only daily data
     python run_pipeline.py --models ridge lstm      # only these ML models
     python run_pipeline.py --stage evaluate         # just one stage
+    python run_pipeline.py --stage explain          # SHAP only (needs a tuned/trained model)
     python run_pipeline.py --name my_label          # label the saved run
     python run_pipeline.py --no-save                # don't save a run record
     python run_pipeline.py --config config/other.yaml
@@ -102,6 +104,11 @@ STAGES = [
     ("evaluate", ["src/07_evaluation.py"], "Evaluation tables + plots", [
         "results/results.json",
     ], False),
+    ("explain", ["src/08_explainability.py"], "Explainability (SHAP)", [
+        "data/processed/splits/{grain}_train.csv",
+        "data/processed/splits/{grain}_test.csv",
+        "data/processed/feature_manifest.json",
+    ], True),
 ]
 STAGE_NAMES = [s[0] for s in STAGES]
 
@@ -318,6 +325,7 @@ def main() -> None:
         "clean": ["--config", str(effective_path)],
         "train": ["--config", str(effective_path), "--jobs", str(resolve_jobs(config))],
         "tune": ["--main-config", str(effective_path)],
+        "explain": ["--config", str(effective_path)],
         "evaluate": ["--grain", grains[0]] if len(grains) == 1 else [],
     }
 

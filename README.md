@@ -129,6 +129,7 @@ something it needs is missing, it tells you which stage to run first.
 | `train` | `src/06_run_models.py` | Scores the baseline methods, then trains and scores every enabled ML model, for each grain |
 | `tune` | `scripts/tuning/tune_*.py` | Hyperparameter search for Ridge, decision tree, random forest, LSTM, XGBoost and SVR (daily only) — the LSTM and random forest are the slow ones |
 | `evaluate` | `src/07_evaluation.py` | Summary table and charts comparing every method, per grain |
+| `explain` | `src/08_explainability.py` | SHAP on the tuned XGBoost: which features push NO₂ up or down, in `results/shap/` |
 
 ## 6. The methods
 
@@ -259,6 +260,7 @@ saving, e.g. for quick tests.
 | Retrain some models only | `python run_pipeline.py --stage train --models ridge lstm`, then `--stage evaluate` |
 | Re-run tuning only | `python run_pipeline.py --stage tune` |
 | Re-make the tables and charts | `python run_pipeline.py --stage evaluate` |
+| Re-make the SHAP explanations | `python run_pipeline.py --stage explain` (add `--grain hourly` for one grain) |
 | Print the full tables / every tuning trial | `python src/07_evaluation.py --detail --trials` |
 | Sensitivity analysis | `data.station_exclusions.enabled: false` in `config.yaml`, run `python run_pipeline.py --no-tune --name no_exclusions`, then set it back to `true` and run the full pipeline again |
 | Turn a model off permanently | `enabled: false` under that model in `training.models` |

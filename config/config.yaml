@@ -16,7 +16,7 @@
 #               Empties data/processed/ first so a run never mixes with a
 #               stale one. results/ is kept (results.json is a cross-run log).
 #   <stage>     just that one stage, reusing what's already on disk:
-#               ingest | clean | preprocess | features | split | train | tune | evaluate
+#               ingest | clean | preprocess | features | split | train | tune | evaluate | explain
 #
 # `--stage <name>` on the command line overrides this for a one-off.
 pipeline:
@@ -157,3 +157,16 @@ training:
         max_epochs: 30
         patience: 5          # stop after this many epochs without val improvement
         random_state: 42
+
+# ---------------------------------------------------------------------------
+# explainability -- SHAP on the XGBoost model (stage 08, results/shap/)
+# ---------------------------------------------------------------------------
+# Uses the tuned XGBoost saved by the tune stage (or refits the default one if
+# there isn't one). Runs for the grains in training.grain.
+explainability:
+  enabled: true
+  feature_sets: [all, exogenous]   # all = best forecaster; exogenous = what external factors drive NO2
+  split: test                      # rows to explain: train | val | test
+  max_rows: 5000                   # random sample size (more = slower, smoother plots)
+  top_features: 15                 # features shown in the summary / bar plots
+  dependence_plots: 4              # one effect-vs-value plot for each of the top N features
