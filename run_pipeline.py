@@ -20,6 +20,11 @@ Stages (pipeline order):
     tune        scripts/tuning/tune_*.py for every enabled ML model
     evaluate    src/07_evaluation.py
     explain     src/08_explainability.py   (SHAP on the tuned XGBoost)
+    analysis    src/09_bootstrap_ci.py          confidence intervals
+                src/10_error_analysis.py        errors by hour/day/station/NO2 level
+                src/11_leave_one_station_out.py unseen-station test
+                src/12_ablation.py              retrain with feature families removed
+                src/13_permutation_importance.py  second check of SHAP
 
 `--stage all` (the default) runs every stage and first empties
 data/processed/ so a run never mixes with a stale one. results/ is never
@@ -33,6 +38,7 @@ log (see scripts/run_record.py), and listed in results/runs/index.csv.
 Usage:
     python run_pipeline.py                          # everything
     python run_pipeline.py --no-tune                # everything except tuning
+    python run_pipeline.py --no-analysis            # skip the extra analysis stage
     python run_pipeline.py --jobs 1                 # train one model at a time
     python run_pipeline.py --grain daily            # only daily data
     python run_pipeline.py --models ridge lstm      # only these ML models
@@ -69,7 +75,7 @@ from scripts import paths  # noqa: E402
 from scripts import run_record  # noqa: E402
 
 # stages whose outputs are worth keeping as a run record
-RECORDED_STAGES = {"train", "tune", "evaluate"}
+RECORDED_STAGES = {"train", "tune", "evaluate", "analysis"}
 
 # (stage name, scripts (relative to the repo root), label, required inputs relative
 # to the repo root -- {grain} is filled in from training.grain,
@@ -108,6 +114,13 @@ STAGES = [
         "data/processed/splits/{grain}_train.csv",
         "data/processed/splits/{grain}_test.csv",
         "data/processed/feature_manifest.json",
+    ], True),
+    ("analysis", ["src/09_bootstrap_ci.py", "src/10_error_analysis.py",
+                  "src/11_leave_one_station_out.py", "src/12_ablation.py",
+                  "src/13_permutation_importance.py"],
+     "Extra analysis (CIs, errors, LOSO, ablation, permutation)", [
+        "data/processed/splits/{grain}_test.csv",
+        "results/predictions",
     ], True),
 ]
 STAGE_NAMES = [s[0] for s in STAGES]
@@ -172,6 +185,9 @@ def apply_overrides(config: dict, args) -> tuple[dict, list[str]]:
     if args.no_tune:
         pipeline["run_tuning"] = False
         notes.append("--no-tune")
+    if args.no_analysis:
+        pipeline["run_analysis"] = False
+        notes.append("--no-analysis")
     if args.jobs is not None:
         pipeline["jobs"] = args.jobs
         notes.append(f"--jobs {args.jobs}")
@@ -280,6 +296,9 @@ def main() -> None:
                         help="Only these ML models, e.g. --models ridge lstm (baselines always run).")
     parser.add_argument("--no-tune", action="store_true",
                         help="Skip the (slow) tune stage when running all stages.")
+    parser.add_argument("--no-analysis", action="store_true",
+                        help="Skip the extra analysis stage (bootstrap, errors, LOSO, ablation, "
+                             "permutation) when running all stages.")
     parser.add_argument("--jobs", type=int, default=None,
                         help="How many models to train at the same time (default: pipeline.jobs in the "
                              "config, normally auto = one per 4 CPU cores, max 4). --jobs 1 = one at a time.")
@@ -293,9 +312,11 @@ def main() -> None:
     stage = resolve_stage(config, args.stage)
     grains = config["training"]["grain"]
     run_tuning = bool(config["pipeline"].get("run_tuning", True))
+    run_analysis = bool(config["pipeline"].get("run_analysis", True))
 
     if stage == "all":
-        run_list = [s for s in STAGES if s[0] != "tune" or run_tuning]
+        run_list = [s for s in STAGES
+                    if (s[0] != "tune" or run_tuning) and (s[0] != "analysis" or run_analysis)]
     else:
         run_list = [s for s in STAGES if s[0] == stage]
     save = (bool(config["pipeline"].get("save_run", True)) and not args.no_save
@@ -311,7 +332,7 @@ def main() -> None:
 
     if stage == "all":
         say(f"Running the FULL pipeline: grains {grains}, "
-            f"tuning {'ON' if run_tuning else 'OFF'}"
+            f"tuning {'ON' if run_tuning else 'OFF'}, analysis {'ON' if run_analysis else 'OFF'}"
             + (f", overrides: {' '.join(overrides)}" if overrides else ""))
         wipe_processed_dir()
     else:
@@ -326,6 +347,7 @@ def main() -> None:
         "train": ["--config", str(effective_path), "--jobs", str(resolve_jobs(config))],
         "tune": ["--main-config", str(effective_path)],
         "explain": ["--config", str(effective_path)],
+        "analysis": ["--config", str(effective_path), "--grain", *grains],
         "evaluate": ["--grain", grains[0]] if len(grains) == 1 else [],
     }
 

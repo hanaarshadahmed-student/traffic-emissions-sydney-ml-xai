@@ -177,7 +177,34 @@ def evaluate_per_station(y_true, y_pred, station_ids: pd.Series) -> pd.DataFrame
             "mae": float(mean_absolute_error(group["y_true"], group["y_pred"])),
             "r2": float(r2_score(group["y_true"], group["y_pred"])) if n >= 5 else float("nan"),
         })
-    return pd.DataFrame(rows).sort_values("r2", na_position="first").reset_index(drop=True)
+    result = pd.DataFrame(rows).sort_values("r2", na_position="first").reset_index(drop=True)
+    _remember_predictions(result, frame)
+    return result
+
+
+# --- row-by-row predictions --------------------------------------------------
+# evaluate_per_station() already receives every prediction, and every model
+# (baselines, 06_run_models.py and all the tuning scripts) passes its result
+# straight to save_per_station(). So the predictions are parked here, keyed
+# by a small tag on the per-station table, and save_per_station() writes them
+# to results/predictions/ -- no changes needed in any caller. Only a short
+# id goes in .attrs (not the arrays), so pandas can still compare/concat the
+# per-station tables safely.
+_PREDICTION_CACHE: dict[int, pd.DataFrame] = {}
+_PREDICTION_CACHE_MAX = 16  # tables scored but never saved (learning curves) are dropped
+_prediction_counter = 0
+
+
+def _remember_predictions(per_station: pd.DataFrame, frame: pd.DataFrame) -> None:
+    global _prediction_counter
+    _prediction_counter += 1
+    frame = frame.copy()
+    # position in the split CSV, so rows can be joined back to dates/hours later
+    frame.insert(0, "row", np.arange(len(frame)))
+    _PREDICTION_CACHE[_prediction_counter] = frame
+    per_station.attrs["predictions_id"] = _prediction_counter
+    while len(_PREDICTION_CACHE) > _PREDICTION_CACHE_MAX:
+        _PREDICTION_CACHE.pop(next(iter(_PREDICTION_CACHE)))
 
 
 def save_per_station(
@@ -187,11 +214,24 @@ def save_per_station(
     """Writes one run's per-station breakdown to its own CSV (one file
     per model/grain/feature_set/split, overwritten on rerun) alongside
     the aggregate results.json, so you can open it directly to see which
-    stations are driving a low aggregate score."""
+    stations are driving a low aggregate score.
+
+    Also writes the row-by-row predictions behind it to
+    results/predictions/<same name>.csv.gz (columns: row, station_id,
+    y_true, y_pred), used for bootstrap confidence intervals and error
+    analysis. `row` is the row's position in data/processed/splits/
+    <grain>_<split>.csv. Train-split predictions are skipped (large, and
+    not needed for any analysis)."""
     out_dir = paths.PER_STATION_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"{model_name}_{stage}_{grain}_{feature_set}_{split}.csv"
+    name = f"{model_name}_{stage}_{grain}_{feature_set}_{split}"
+    path = out_dir / f"{name}.csv"
     per_station.to_csv(path, index=False)
+
+    predictions = _PREDICTION_CACHE.pop(per_station.attrs.get("predictions_id"), None)
+    if predictions is not None and split != "train":
+        paths.PREDICTIONS_DIR.mkdir(parents=True, exist_ok=True)
+        predictions.to_csv(paths.PREDICTIONS_DIR / f"{name}.csv.gz", index=False)
     return path
 
 

@@ -16,12 +16,15 @@
 #               Empties data/processed/ first so a run never mixes with a
 #               stale one. results/ is kept (results.json is a cross-run log).
 #   <stage>     just that one stage, reusing what's already on disk:
-#               ingest | clean | preprocess | features | split | train | tune | evaluate | explain
+#               ingest | clean | preprocess | features | split | train | tune | evaluate | explain | analysis
 #
 # `--stage <name>` on the command line overrides this for a one-off.
 pipeline:
   stage: all
   run_tuning: true    # `stage: all` includes the (slow) tune stage; --no-tune skips it
+  run_analysis: true  # `stage: all` ends with the extra analysis stage (bootstrap CIs,
+                      # error analysis, leave-one-station-out, ablation, permutation
+                      # importance -- a few minutes); --no-analysis skips it
   jobs: auto          # models trained at the same time: a number, or auto =
                       # one per 4 CPU cores (max 4). 1 = one at a time.
   save_run: true      # save results + this config + log to results/runs/<run_id>/
@@ -188,3 +191,6 @@ explainability:
   max_rows: 5000                   # random sample size (more = slower, smoother plots)
   top_features: 15                 # features shown in the summary / bar plots
   dependence_plots: 4              # one effect-vs-value plot for each of the top N features
+  by_road_type: true               # importance per road type (Highway / Major Road / Local Street)
+  road_type_split: train           # train = the only split with 2+ stations per road type
+                                   # (test rows are all Local Street)

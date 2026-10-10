@@ -35,6 +35,7 @@ SPLIT_MANIFEST_PATH = SPLITS_DIR / "split_manifest.json"
 RESULTS_DIR = ROOT_DIR / "results"
 RESULTS_PATH = RESULTS_DIR / "results.json"
 PER_STATION_DIR = RESULTS_DIR / "per_station"
+PREDICTIONS_DIR = RESULTS_DIR / "predictions"     # row-by-row y_true / y_pred
 TUNING_DIR = RESULTS_DIR / "tuning"
 LEARNING_CURVE_DIR = TUNING_DIR / "learning_curves"
 OVERFITTING_DIR = TUNING_DIR / "overfitting"
