@@ -260,13 +260,13 @@ def _plot_overall_learning_curve(frame: pd.DataFrame, path: Path) -> None:
 
 def _plot_station_learning_curve(frame: pd.DataFrame, path: Path) -> None:
     figure, axis = plt.subplots(figsize=(10, 6))
-    for station_id, station_frame in frame.groupby("station_id"):
+    for station, station_frame in frame.groupby("station"):
         axis.plot(
             station_frame["train_rows"],
             station_frame["r2"],
             marker="o",
             linewidth=1.3,
-            label=station_id,
+            label=station,
         )
     axis.axhline(0, color="black", linewidth=0.8, alpha=0.5)
     axis.set_title("Validation R² by station")

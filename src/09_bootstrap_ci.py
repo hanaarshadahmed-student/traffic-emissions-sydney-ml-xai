@@ -214,7 +214,9 @@ def compare_to_best(table: pd.DataFrame, boot: dict) -> pd.DataFrame:
             rows.append({
                 "feature_set": fs, "best": best["method"], "model": r.method, "stage": r.stage,
                 "r2_difference": best["r2"] - r.r2, "diff_lo": lo, "diff_hi": hi,
-                "verdict": "not distinguishable from best" if lo <= 0 else "worse than best",
+                # the "best" is the best ML model, so a baseline can still beat it
+                "verdict": ("better than best ML model" if hi < 0 else
+                            "worse than best" if lo > 0 else "not distinguishable from best"),
             })
     return pd.DataFrame(rows)
 

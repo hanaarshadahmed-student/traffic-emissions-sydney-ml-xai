@@ -57,6 +57,7 @@ import pandas as pd  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts import paths  # noqa: E402
+from scripts.stations import add_station_name, station_label  # noqa: E402
 
 OUT_DIR = paths.RESULTS_DIR / "holiday"
 WINDOW_DAYS = 14
@@ -148,7 +149,7 @@ def by_station(df: pd.DataFrame, grain: str) -> pd.DataFrame:
     out["traffic_change_pct"] = 100 * (out["traffic_holiday"] / out["traffic_control"] - 1)
     out["no2_change_pct"] = 100 * (out["no2_holiday"] / out["no2_control"] - 1)
     out.insert(0, "grain", grain)
-    return out.reset_index()
+    return add_station_name(out.reset_index())
 
 
 def hourly_profile(df: pd.DataFrame) -> pd.DataFrame:
@@ -200,8 +201,8 @@ def run(grain: str, n_boot: int, seed: int) -> None:
         print(f"  holiday effect on {r.outcome:22s} {r.percent:+6.1f}%  "
               f"(95% CI {r.percent_lo:+.1f}% to {r.percent_hi:+.1f}%)  "
               f"[same station, month{', hour' if grain == 'hourly' else ''}, weather]")
-    print("  by station (raw averages): " + "; ".join(
-        f"{r.station_id}: traffic {r.traffic_change_pct:+.0f}%, NO2 {r.no2_change_pct:+.0f}%"
+    print("  by station (raw averages):\n    " + "\n    ".join(
+        f"{station_label(r.station_id):38s} traffic {r.traffic_change_pct:+.0f}%, NO2 {r.no2_change_pct:+.0f}%"
         for r in stations.itertuples()))
     if grain == "hourly":
         prof = hourly_profile(df)

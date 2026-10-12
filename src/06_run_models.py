@@ -312,7 +312,7 @@ def print_result(task, results, split, worst_stations) -> None:
         worst = per_station.dropna(subset=["r2"]).head(worst_stations)
         if len(worst):
             tags = " | ".join(
-                f"{row.station_id} n={row.n_rows} R2={row.r2:.2f}" for row in worst.itertuples()
+                f"{row.station} n={row.n_rows} R2={row.r2:.2f}" for row in worst.itertuples()
             )
             print(f"{'':26s}   worst stations ({split}): {tags}", flush=True)
 

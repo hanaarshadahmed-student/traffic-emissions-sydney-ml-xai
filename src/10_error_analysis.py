@@ -57,6 +57,7 @@ import pandas as pd  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts import paths  # noqa: E402
+from scripts.stations import station_label  # noqa: E402
 
 OUT_DIR = paths.RESULTS_DIR / "error_analysis"
 DISPLAY = {
@@ -92,7 +93,8 @@ def load(grain: str, split: str, feature_set: str) -> pd.DataFrame | None:
                        dtype={"station_id": str})
     ts = pd.to_datetime(meta["timestamp"])
     frame = pd.DataFrame({
-        "station": meta["station_id"],
+        "station_id": meta["station_id"],
+        "station": meta["station_id"].map(station_label),
         "road_type": meta["road_type_bucket"],
         "hour": ts.dt.hour,
         "day_type": np.where(ts.dt.dayofweek >= 5, "weekend", "weekday"),
@@ -116,7 +118,7 @@ def load(grain: str, split: str, feature_set: str) -> pd.DataFrame | None:
     order = [m for m in DISPLAY if m in chosen.index]
     for model in order:
         pred = pd.read_csv(chosen.loc[model, "path"], dtype={"station_id": str}).sort_values("row")
-        if len(pred) != len(frame) or not (pred["station_id"].to_numpy() == frame["station"].to_numpy()).all():
+        if len(pred) != len(frame) or not (pred["station_id"].to_numpy() == frame["station_id"].to_numpy()).all():
             raise SystemExit(f"{chosen.loc[model, 'path'].name} doesn't line up with the current "
                              f"{grain}_{split}.csv -- it comes from a different run. Rerun the pipeline.")
         frame[DISPLAY[model]] = pred["y_pred"].to_numpy(float)
@@ -157,7 +159,10 @@ def plot(table: pd.DataFrame, by: str, models: list[str], title: str, path: Path
     axes[0].set_ylabel("RMSE (pphm)")
     axes[1].set_ylabel("bias (pphm)\n< 0 = under-predicts")
     axes[1].axhline(0, color="#555555", linewidth=0.8)
-    axes[1].set_xticks(x, labels, rotation=0 if len(labels) <= 12 else 90)
+    if by == "station":  # long names: slant them
+        axes[1].set_xticks(x, labels, rotation=35, ha="right", fontsize=8)
+    else:
+        axes[1].set_xticks(x, labels, rotation=0 if len(labels) <= 12 else 90)
     axes[1].set_xlabel({"no2_level": "actual NO$_2$ level (fifths, lowest to highest)",
                         "school_hol": "school holiday",
                         "traffic_level": "traffic level for that road (fifths, quietest to busiest)"}.get(by, by.replace("_", " ")))

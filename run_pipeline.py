@@ -26,6 +26,7 @@ Stages (pipeline order):
                 src/12_ablation.py              retrain with feature families removed
                 src/13_permutation_importance.py  second check of SHAP
                 src/14_holiday_check.py         public holidays: less traffic, same clock
+                src/15_top_models_permutation.py  do the top 3 models rely on the same drivers?
 
 `--stage all` (the default) runs every stage and first empties
 data/processed/ so a run never mixes with a stale one. results/ is never
@@ -118,8 +119,9 @@ STAGES = [
     ], True),
     ("analysis", ["src/09_bootstrap_ci.py", "src/10_error_analysis.py",
                   "src/11_leave_one_station_out.py", "src/12_ablation.py",
-                  "src/13_permutation_importance.py", "src/14_holiday_check.py"],
-     "Extra analysis (CIs, errors, LOSO, ablation, permutation, holidays)", [
+                  "src/13_permutation_importance.py", "src/14_holiday_check.py",
+                  "src/15_top_models_permutation.py"],
+     "Extra analysis (CIs, errors, LOSO, ablation, permutation, holidays, top-3 models)", [
         "data/processed/splits/{grain}_test.csv",
         "results/predictions",
     ], True),

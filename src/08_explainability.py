@@ -78,6 +78,7 @@ from scripts.model_utils import (  # noqa: E402
 )
 from scripts.feature_families import FAMILIES, family_of, traffic_part  # noqa: E402,F401
 from scripts.models import build_model  # noqa: E402
+from scripts.stations import station_label  # noqa: E402
 
 OUT_DIR = paths.SHAP_DIR
 TARGET_UNIT = "pphm"
@@ -293,7 +294,7 @@ def single_predictions(explainer, shap_values: np.ndarray, model, X: pd.DataFram
                                        data=raw.iloc[i].to_numpy(), feature_names=list(X.columns))
         shap.plots.waterfall(explanation, max_display=12, show=False)
         m = meta.loc[label]
-        plt.title(f"{case.replace('_', ' ')} -- station {m.station_id}, {m.timestamp}\n"
+        plt.title(f"{case.replace('_', ' ')} -- {station_label(m.station_id)}, {m.timestamp}\n"
                   f"actual NO$_2$ {m.no2_pphm:.2f}, predicted {prediction:.2f} {TARGET_UNIT}",
                   fontsize=10)
         plt.tight_layout()
@@ -301,7 +302,8 @@ def single_predictions(explainer, shap_values: np.ndarray, model, X: pd.DataFram
         plt.close("all")
         order = np.argsort(-np.abs(shap_values[i]))[:10]
         for rank, j in enumerate(order, 1):
-            rows.append({"case": case, "station_id": m.station_id, "timestamp": m.timestamp,
+            rows.append({"case": case, "station_id": m.station_id, "station": station_label(m.station_id),
+                         "timestamp": m.timestamp,
                          "actual_no2": m.no2_pphm, "predicted_no2": prediction, "base_value": base,
                          "rank": rank, "feature": X.columns[j], "family": family_of(X.columns[j]),
                          "value": raw.iloc[i, j], f"shap_{TARGET_UNIT}": shap_values[i, j]})
@@ -441,7 +443,7 @@ def shap_by_road_type(model, grain: str, feature_set: str, args) -> None:
         total = mean_abs.sum() or 1.0
         stations = sorted(meta.loc[idx, "station_id"].unique())
         info = {"road_type": road_type, "n_rows": len(idx), "n_stations": len(stations),
-                "stations": " ".join(stations)}
+                "stations": "; ".join(station_label(s) for s in stations)}
         by_family = mean_abs.groupby([family_of(f) for f in mean_abs.index]).sum()
         for family, value in by_family.items():
             family_rows.append({**info, "family": family,

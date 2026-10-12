@@ -34,6 +34,7 @@ import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 from scripts import paths
+from scripts.stations import station_label
 
 SPLITS_DIR = paths.SPLITS_DIR
 RESULTS_DIR = paths.RESULTS_DIR
@@ -172,6 +173,7 @@ def evaluate_per_station(y_true, y_pred, station_ids: pd.Series) -> pd.DataFrame
         n = len(group)
         rows.append({
             "station_id": station_id,
+            "station": station_label(station_id),
             "n_rows": n,
             "rmse": float(np.sqrt(mean_squared_error(group["y_true"], group["y_pred"]))),
             "mae": float(mean_absolute_error(group["y_true"], group["y_pred"])),

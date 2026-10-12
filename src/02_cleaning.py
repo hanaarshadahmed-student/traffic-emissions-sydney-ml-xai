@@ -39,6 +39,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts import paths  # noqa: E402
+from scripts.stations import station_label  # noqa: E402
 
 OUT_DIR = str(paths.PROCESSED_DIR)
 
@@ -89,7 +90,7 @@ def preprocess(df, label, min_days_col_scale=1, exclusions=None, clip_negative_n
         n = len(df[df["station_id"] == sid])
         aq_site = df.loc[df["station_id"] == sid, "matched_aq_site"].iloc[0]
         excluded_records.append({
-            "station_id": sid, "reason": "no NO2 coverage at matched AQ site",
+            "station_id": sid, "station": station_label(sid), "reason": "no NO2 coverage at matched AQ site",
             "matched_aq_site": aq_site, "rows_dropped": n,
         })
     before = len(df)
@@ -102,7 +103,7 @@ def preprocess(df, label, min_days_col_scale=1, exclusions=None, clip_negative_n
     to_drop = [sid for sid in exclusions if sid in set(df["station_id"])]
     for sid in to_drop:
         excluded_records.append({
-            "station_id": sid, "reason": exclusions[sid],
+            "station_id": sid, "station": station_label(sid), "reason": exclusions[sid],
             "matched_aq_site": df.loc[df["station_id"] == sid, "matched_aq_site"].iloc[0],
             "rows_dropped": int((df["station_id"] == sid).sum()),
         })
@@ -174,7 +175,7 @@ def preprocess(df, label, min_days_col_scale=1, exclusions=None, clip_negative_n
     log(f"\nFinal [{label}] station list:")
     for sid in sorted(df_clean["station_id"].unique()):
         n = len(df_clean[df_clean["station_id"] == sid])
-        log(f"  {sid}: {n} rows")
+        log(f"  {station_label(sid):38s} {n} rows")
 
     return df_clean, pd.DataFrame(excluded_records)
 

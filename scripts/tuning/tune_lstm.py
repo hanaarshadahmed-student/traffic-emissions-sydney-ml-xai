@@ -125,7 +125,24 @@ def run_experiment(grain, feature_set, config, candidates, frames, main_params):
     data = best_run["data"]
     paths.SAVED_MODELS_DIR.mkdir(parents=True, exist_ok=True)
     model_path = paths.SAVED_MODELS_DIR / f"{MODEL}_{grain}_{feature_set}.pt"
-    torch.save(best.network_.state_dict(), model_path)
+    # saved with its settings, target scaling and feature list (same format as
+    # the GRU) so src/15_top_models_permutation.py can reload it
+    torch.save(
+        {
+            "state_dict": best.network_.state_dict(),
+            "model_params": {
+                "n_inputs": data.features.shape[1] + 1,
+                "hidden_size": best.hidden_size,
+                "num_layers": best.num_layers,
+                "dropout": best.dropout,
+                "seq_len": best.window_length(grain),
+            },
+            "target_mean": best.y_mean_,
+            "target_std": best.y_std_,
+            "features": features,
+        },
+        model_path,
+    )
 
     save_result(MODEL, grain, feature_set,
                 {**metrics, "tuned": True, "n_trials": len(candidates),

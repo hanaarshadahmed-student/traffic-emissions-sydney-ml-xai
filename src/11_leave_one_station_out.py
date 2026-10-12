@@ -56,6 +56,7 @@ from scripts.experiment_utils import (  # noqa: E402
 )
 from scripts.model_utils import evaluate, get_feature_columns  # noqa: E402
 from scripts.models import display_name  # noqa: E402
+from scripts.stations import add_station_name, station_label  # noqa: E402
 
 OUT_DIR = paths.RESULTS_DIR / "loso"
 MIN_ROWS = 30  # a station with fewer rows can't be scored reliably
@@ -90,9 +91,9 @@ def run(grain: str, feature_set: str, models: list[str], config: dict) -> None:
             rows.append({"station_id": station, "road_type": road[station], "n_rows": len(held),
                          "model": name, **scores, "seconds": round(time.perf_counter() - started, 1)})
             line.append(f"{display_name(name)} R2 {scores['r2']:6.3f}")
-        print(f"  {station:8s} ({road[station]:12s}, {len(held):6,} rows): " + " | ".join(line), flush=True)
+        print(f"  {station_label(station):38s} ({road[station]:12s}, {len(held):6,} rows): " + " | ".join(line), flush=True)
 
-    table = pd.DataFrame(rows)
+    table = add_station_name(pd.DataFrame(rows))
     summary = []
     for name, parts in pooled.items():
         per_station = table[table["model"] == name]["r2"]
@@ -118,18 +119,18 @@ def run(grain: str, feature_set: str, models: list[str], config: dict) -> None:
 
 def plot(table: pd.DataFrame, models: list[str], grain: str, feature_set: str, path: Path) -> None:
     stations = table.drop_duplicates("station_id")
-    labels = [f"{s}\n{r}" for s, r in zip(stations["station_id"], stations["road_type"])]
+    labels = [f"{station_label(s, two_lines=True)}\n({r})" for s, r in zip(stations["station_id"], stations["road_type"])]
     names = ["network_mean", *models]
     x = np.arange(len(labels))
     width = 0.8 / len(names)
-    fig, ax = plt.subplots(figsize=(max(7, 1.1 * len(labels) + 2), 4.8))
+    fig, ax = plt.subplots(figsize=(max(7, 1.5 * len(labels) + 2), 5.2))
     for i, name in enumerate(names):
         values = table[table["model"] == name].set_index("station_id")["r2"].reindex(stations["station_id"])
         ax.bar(x - 0.4 + width * (i + 0.5), values.clip(lower=-1.0), width,
                label="network mean (no model)" if name == "network_mean" else display_name(name),
                color="#b0b0b0" if name == "network_mean" else None)
     ax.axhline(0, color="#555555", linewidth=0.8)
-    ax.set_xticks(x, labels, fontsize=8)
+    ax.set_xticks(x, labels, fontsize=7)
     ax.set_ylabel("R$^2$ on the held-out station (clipped at -1)")
     ax.set_title(f"Leave-one-station-out -- {grain}, {feature_set} features")
     ax.legend(fontsize=8)
