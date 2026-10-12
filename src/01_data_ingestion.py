@@ -92,6 +92,10 @@ STATIONS = {
     "10011 - New South Head Road":  {"lat": -33.876652, "lon": 151.230606, "suburb": "Edgecliff",       "lga": "Woollahra",        "weather": ("metro", "randwick"),     "emissions": ("metro", "cook_phillip"),  "aq_site": "COOK AND PHILLIP", "aq_distance_km": 1.8},
     "100001 - Cambridge Street":    {"lat": -33.878181, "lon": 150.924942, "suburb": "Canley Heights",  "lga": "Fairfield",        "weather": ("metro", "liverpool"),    "emissions": ("metro", "liverpool"),     "aq_site": "LIVERPOOL",        "aq_distance_km": 4.8},
     "6178-PR - Picton Road":        {"lat": -34.372967, "lon": 150.829529, "suburb": "Cordeaux",        "lga": "Wollongong",       "weather": ("metro", "kembla_grange"),"emissions": ("metro", "wollongong"),    "aq_site": "WOLLONGONG",       "aq_distance_km": 8.2},
+    "7163 - Victoria Road":         {"lat": -33.865181, "lon": 151.171997, "suburb": "Rozelle",         "lga": "Inner West",       "weather": ("metro", "rozelle"),          "emissions": ("metro", "rozelle"),          "aq_site": "ROZELLE",          "aq_distance_km": 0.75},
+    "21229 - Military Road":        {"lat": -33.830160, "lon": 151.217280, "suburb": "Neutral Bay",     "lga": "North Sydney",     "weather": ("metro", "cammeray"),         "emissions": ("metro", "cammeray"),         "aq_site": "CAMMERAY",         "aq_distance_km": 0.33},
+    "50240 - Briens Road":          {"lat": -33.796436, "lon": 150.987595, "suburb": "Northmead",       "lga": "Parramatta",       "weather": ("metro", "parramatta_north"), "emissions": ("metro", "parramatta_north"), "aq_site": "PARRAMATTA NORTH", "aq_distance_km": 1.0},
+    "7289 - Thomas Street":         {"lat": -32.906013, "lon": 151.671356, "suburb": "Wallsend",        "lga": "Newcastle",        "weather": ("metro", "wallsend"),         "emissions": ("metro", "wallsend"),         "aq_site": "WALLSEND",         "aq_distance_km": 1.3},
 }
 
 

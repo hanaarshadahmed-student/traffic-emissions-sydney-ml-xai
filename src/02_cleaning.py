@@ -54,6 +54,19 @@ def load_station_exclusions(config_path=paths.CONFIG_PATH) -> dict:
         return {}
     return {str(k): v for k, v in (cfg.get("stations") or {}).items()}
 
+def load_clip_negative_no2(config_path=paths.CONFIG_PATH) -> bool:
+    """data.clip_negative_no2 in config.yaml (default false = keep negatives).
+
+    Negative NO2 readings are monitor noise around a true value near zero
+    (see data/Data.md). The main analysis KEEPS them, because setting them
+    to zero biases averages upward; setting this to true is the
+    sensitivity check that tests whether that choice matters."""
+    if not os.path.exists(config_path):
+        return False
+    with open(config_path) as f:
+        return bool(((yaml.safe_load(f) or {}).get("data") or {}).get("clip_negative_no2", False))
+
+
 # Stations with fewer days of traffic data than this are flagged (not dropped)
 # as thin-coverage -- a judgement call, adjust and justify in your report.
 MIN_TRAFFIC_DAYS = 90
@@ -63,7 +76,7 @@ def log(msg):
     print(msg)
 
 
-def preprocess(df, label, min_days_col_scale=1, exclusions=None):
+def preprocess(df, label, min_days_col_scale=1, exclusions=None, clip_negative_no2=False):
     """Shared cleaning logic. min_days_col_scale=24 for hourly data, since
     'days of coverage' there means station-hours / 24."""
     excluded_records = []
@@ -129,6 +142,17 @@ def preprocess(df, label, min_days_col_scale=1, exclusions=None):
         for sid, n in missing_no2_by_station.items():
             log(f"             {sid}: {n} rows")
 
+    # ---- Step 4b: negative NO2 readings (kept unless clip_negative_no2) ----
+    negative = df_clean["no2_pphm"] < 0
+    if clip_negative_no2:
+        log(f"Step 4b -- CLIPPED {negative.sum()} negative NO2 values to 0 "
+            f"(data.clip_negative_no2: true -- sensitivity run)")
+        df_clean.loc[negative, "no2_pphm"] = 0.0
+    else:
+        by_station = df_clean.loc[negative].groupby("station_id").size()
+        log(f"Step 4b -- kept {negative.sum()} negative NO2 values ({negative.mean():.1%} of rows; "
+            f"monitor noise near zero -- see data/Data.md): {by_station.to_dict()}")
+
     # ---- Step 5: flag (not drop) stations with thin coverage ----
     unit_counts = df_clean.groupby("station_id").size() / min_days_col_scale
     thin = unit_counts[unit_counts < MIN_TRAFFIC_DAYS]
@@ -158,17 +182,20 @@ def preprocess(df, label, min_days_col_scale=1, exclusions=None):
 def run(config_path=paths.CONFIG_PATH):
     os.makedirs(OUT_DIR, exist_ok=True)
     exclusions = load_station_exclusions(config_path)
+    clip = load_clip_negative_no2(config_path)
 
     daily_raw = pd.read_csv(os.path.join(OUT_DIR, "final_combined_dataset_daily.csv"),
                              parse_dates=["date"], dtype={"station_id": str}, low_memory=False)
-    daily_clean, daily_excluded = preprocess(daily_raw, "DAILY", min_days_col_scale=1, exclusions=exclusions)
+    daily_clean, daily_excluded = preprocess(daily_raw, "DAILY", min_days_col_scale=1, exclusions=exclusions,
+                                               clip_negative_no2=clip)
     daily_clean.to_csv(os.path.join(OUT_DIR, "preprocessed_daily.csv"), index=False)
     daily_excluded.to_csv(os.path.join(OUT_DIR, "excluded_stations_log_daily.csv"), index=False)
     log(f"\nSaved -> {OUT_DIR}/preprocessed_daily.csv ({len(daily_clean)} rows)")
 
     hourly_raw = pd.read_csv(os.path.join(OUT_DIR, "final_combined_dataset_hourly.csv"),
                               parse_dates=["date"], dtype={"station_id": str}, low_memory=False)
-    hourly_clean, hourly_excluded = preprocess(hourly_raw, "HOURLY", min_days_col_scale=24, exclusions=exclusions)
+    hourly_clean, hourly_excluded = preprocess(hourly_raw, "HOURLY", min_days_col_scale=24, exclusions=exclusions,
+                                                 clip_negative_no2=clip)
     hourly_clean.to_csv(os.path.join(OUT_DIR, "preprocessed_hourly.csv"), index=False)
     hourly_excluded.to_csv(os.path.join(OUT_DIR, "excluded_stations_log_hourly.csv"), index=False)
     log(f"\nSaved -> {OUT_DIR}/preprocessed_hourly.csv ({len(hourly_clean)} rows)")

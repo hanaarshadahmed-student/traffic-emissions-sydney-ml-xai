@@ -27,6 +27,8 @@ way as SHAP.
 Outputs (results/permutation/):
   permutation_families_<grain>_<feature_set>.csv   R2 drop per family (+ SHAP share, ranks)
   permutation_features_<grain>_<feature_set>.csv   R2 drop per single feature
+  permutation_traffic_parts_<grain>_<feature_set>.csv  R2 drop per part of traffic
+                                                   (volume, heavy vehicles, ...)
   permutation_<grain>_<feature_set>.png            permutation vs SHAP, per family
 
 Usage:
@@ -53,7 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts import paths  # noqa: E402
 from scripts.experiment_utils import TARGET, explained_xgboost, load_config, r2, read_split  # noqa: E402
-from scripts.feature_families import family_of, group_features  # noqa: E402
+from scripts.feature_families import family_of, group_features, group_traffic_parts  # noqa: E402
 from scripts.model_utils import get_feature_columns  # noqa: E402
 
 OUT_DIR = paths.RESULTS_DIR / "permutation"
@@ -90,6 +92,15 @@ def run(grain: str, feature_set: str, args, config: dict) -> None:
         family_rows.append({"family": family, "n_features": len(cols),
                             "r2_drop": drops.mean(), "r2_drop_sd": drops.std(ddof=1)})
     families = pd.DataFrame(family_rows).sort_values("r2_drop", ascending=False)
+
+    # C2: the parts of traffic, each shuffled as a whole (total volume, heavy
+    # vehicles, direction of flow, traffic x time, unexpected traffic)
+    part_rows = []
+    for part, cols in group_traffic_parts(features).items():
+        drops = permutation_drop(model, X, y, cols, args.repeats, rng, base)
+        part_rows.append({"traffic_part": part, "n_features": len(cols),
+                          "r2_drop": drops.mean(), "r2_drop_sd": drops.std(ddof=1)})
+    traffic_parts = pd.DataFrame(part_rows).sort_values("r2_drop", ascending=False)
     families["permutation_rank"] = range(1, len(families) + 1)
 
     feature_rows = []
@@ -118,6 +129,7 @@ def run(grain: str, feature_set: str, args, config: dict) -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     tag = f"{grain}_{feature_set}"
     families.to_csv(OUT_DIR / f"permutation_families_{tag}.csv", index=False)
+    traffic_parts.to_csv(OUT_DIR / f"permutation_traffic_parts_{tag}.csv", index=False)
     singles.to_csv(OUT_DIR / f"permutation_features_{tag}.csv", index=False)
     plot(families, singles, grain, feature_set, rho, base, OUT_DIR / f"permutation_{tag}.png")
 
@@ -128,6 +140,9 @@ def run(grain: str, feature_set: str, args, config: dict) -> None:
           .replace("\n", "\n    "))
     if not np.isnan(rho):
         print(f"  agreement with SHAP family ranking: Spearman rho = {rho:.2f}")
+    if len(traffic_parts):
+        print("  traffic parts (R2 drop when shuffled together): " + ", ".join(
+            f"{r.traffic_part} {r.r2_drop:.3f}" for r in traffic_parts.itertuples()))
     print("  top 10 single features:")
     print("    " + singles.head(10)[["rank", "feature", "family", "r2_drop"]]
           .to_string(index=False, float_format=lambda v: f"{v:.3f}").replace("\n", "\n    "))

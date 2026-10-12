@@ -24,7 +24,7 @@ pipeline:
   run_tuning: true    # `stage: all` includes the (slow) tune stage; --no-tune skips it
   run_analysis: true  # `stage: all` ends with the extra analysis stage (bootstrap CIs,
                       # error analysis, leave-one-station-out, ablation, permutation
-                      # importance -- a few minutes); --no-analysis skips it
+                      # importance, public-holiday check -- a few minutes); --no-analysis skips it
   jobs: auto          # models trained at the same time: a number, or auto =
                       # one per 4 CPU cores (max 4). 1 = one at a time.
   save_run: true      # save results + this config + log to results/runs/<run_id>/
@@ -49,11 +49,16 @@ pipeline:
 # Eisinger & Niemeier 2010). This rule was set after inspecting the
 # data, which is why the sensitivity analysis is reported alongside.
 data:
+  # Negative NO2 readings (6% of hours, mostly the Newcastle and Liverpool
+  # monitors) are instrument noise around a true value near zero. Kept by
+  # default (setting them to 0 biases averages upward); true = sensitivity run.
+  clip_negative_no2: false
   station_exclusions:
     enabled: true
     stations:
       "6124": "PORT MACQUARIE AQ site: >3x year-on-year NO2 shift unrelated to traffic; 36.9 km from monitor"
       "6119-PR": "PORT MACQUARIE AQ site: >3x year-on-year NO2 shift unrelated to traffic; 87.3 km from monitor"
+      "MUB001": "SENSITIVITY ONLY: 83.2 km from ALBURY monitor (flagged REVIEW)"
 
 # ---------------------------------------------------------------------------
 # training -- what 06_run_models.py trains and how it's scored
@@ -194,3 +199,7 @@ explainability:
   by_road_type: true               # importance per road type (Highway / Major Road / Local Street)
   road_type_split: train           # train = the only split with 2+ stations per road type
                                    # (test rows are all Local Street)
+  waterfalls: true                 # SHAP for single predictions: highest-NO2, typical, calm vs
+                                   # windy rush hour (waterfall_<grain>_<set>_<case>.png)
+  interaction_rows: 1000           # rows for SHAP interaction values (0 = skip; cost grows
+                                   # with features^2, so a sample is used)

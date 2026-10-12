@@ -47,3 +47,41 @@ def group_features(features: list[str]) -> dict[str, list[str]]:
     for feature in features:
         groups[family_of(feature)].append(feature)
     return {name: cols for name, cols in groups.items() if cols}
+
+# --- traffic broken into its parts (RQ1: WHICH traffic factors matter) -------
+# Applied only to features in the "Traffic" family. First match wins.
+TRAFFIC_PARTS = [
+    # traffic compared with what is normal for that station / hour / weekday
+    # (04_feature_engineering.py: add_unexpected_traffic_features)
+    ("Unexpected traffic", ("unexpected",)),
+    # heavy vehicles (trucks, buses): mostly diesel, far more NOx per vehicle
+    ("Heavy vehicles", ("heavy",)),
+    # which way the traffic flows (share northbound, imbalance, ...)
+    ("Direction of flow", ("direction_share", "directional", "direction_count")),
+    # traffic multiplied by a time flag (traffic x peak hour / working day / weekend)
+    ("Traffic x time", ("_x_working_day", "_x_weekend", "_x_am_peak", "_x_pm_peak", "_x_peak")),
+]
+
+
+def traffic_part(feature: str) -> str | None:
+    """Which part of traffic a feature describes, or None if it isn't in the
+    Traffic family. Anything traffic that matches no part is "Total volume"
+    (counts, lags, rolling means, changes, ratios to the station's average)."""
+    if family_of(feature) != "Traffic":
+        return None
+    name = feature.lower()
+    for part, keys in TRAFFIC_PARTS:
+        if any(key in name for key in keys):
+            return part
+    return "Total volume"
+
+
+def group_traffic_parts(features: list[str]) -> dict[str, list[str]]:
+    """{traffic part: [features in it]} for the Traffic-family features only."""
+    groups: dict[str, list[str]] = {}
+    for feature in features:
+        part = traffic_part(feature)
+        if part:
+            groups.setdefault(part, []).append(feature)
+    order = [p for p, _ in TRAFFIC_PARTS] + ["Total volume"]
+    return {p: groups[p] for p in order if p in groups}

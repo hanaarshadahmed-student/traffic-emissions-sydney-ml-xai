@@ -20,6 +20,9 @@ Breakdowns (one table per breakdown, every model side by side):
   road_type    Highway / Major Road / Local Street. The TEST rows are all
                Local Street, so this one is also computed on the VALIDATION
                rows (road_type_val) -- the only split with all three types.
+  traffic_level  traffic RELATIVE TO EACH ROAD: each station's own quietest
+               to busiest fifth of hours (days) -- "different traffic
+               conditions" in RQ3
   no2_level    actual NO2 in five equal-sized groups (quintiles), lowest to
                highest -- shows whether peaks are under-predicted
 
@@ -84,7 +87,8 @@ def load(grain: str, split: str, feature_set: str) -> pd.DataFrame | None:
               .drop_duplicates("model").set_index("model"))
 
     meta = pd.read_csv(paths.SPLITS_DIR / f"{grain}_{split}.csv",
-                       usecols=["station_id", "timestamp", "school_holiday", "road_type_bucket", "no2_pphm"],
+                       usecols=["station_id", "timestamp", "school_holiday", "road_type_bucket", "no2_pphm",
+                                "traffic_volume_total"],
                        dtype={"station_id": str})
     ts = pd.to_datetime(meta["timestamp"])
     frame = pd.DataFrame({
@@ -97,6 +101,16 @@ def load(grain: str, split: str, feature_set: str) -> pd.DataFrame | None:
         "month": pd.Categorical(ts.dt.month.map(lambda m: MONTHS[m - 1]), MONTHS, ordered=True),
         "y_true": meta["no2_pphm"].to_numpy(float),
     })
+    # traffic level RELATIVE TO EACH ROAD: a station's own quietest to busiest
+    # fifth of hours (days), so a busy local street and a busy motorway both
+    # count as "busy". Scaling in 05 is linear, so ranks are unaffected.
+    frame["traffic_level"] = (
+        meta.groupby("station_id")["traffic_volume_total"]
+        .transform(lambda v: pd.qcut(v.rank(method="first"), 5, labels=False))
+        .map({0: "1 quietest", 1: "2", 2: "3", 3: "4", 4: "5 busiest"})
+    )
+    frame["traffic_level"] = pd.Categorical(frame["traffic_level"],
+                                            ["1 quietest", "2", "3", "4", "5 busiest"], ordered=True)
     frame["no2_level"] = pd.qcut(frame["y_true"].rank(method="first"), 5,
                                  labels=["1 lowest", "2", "3", "4", "5 highest"])
     order = [m for m in DISPLAY if m in chosen.index]
@@ -128,7 +142,7 @@ def breakdown(frame: pd.DataFrame, by: str) -> pd.DataFrame:
 def plot(table: pd.DataFrame, by: str, models: list[str], title: str, path: Path) -> None:
     labels = table[by].astype(str).tolist()
     x = np.arange(len(labels))
-    line = by in ("hour", "month", "no2_level")
+    line = by in ("hour", "month", "no2_level", "traffic_level")
     fig, axes = plt.subplots(2, 1, figsize=(max(6.5, 0.45 * len(labels) + 3), 7), sharex=True)
     width = 0.8 / len(models)
     for i, model in enumerate(models):
@@ -145,7 +159,8 @@ def plot(table: pd.DataFrame, by: str, models: list[str], title: str, path: Path
     axes[1].axhline(0, color="#555555", linewidth=0.8)
     axes[1].set_xticks(x, labels, rotation=0 if len(labels) <= 12 else 90)
     axes[1].set_xlabel({"no2_level": "actual NO$_2$ level (fifths, lowest to highest)",
-                        "school_hol": "school holiday"}.get(by, by.replace("_", " ")))
+                        "school_hol": "school holiday",
+                        "traffic_level": "traffic level for that road (fifths, quietest to busiest)"}.get(by, by.replace("_", " ")))
     for ax in axes:
         ax.grid(alpha=0.3)
     axes[0].legend(fontsize=8, ncol=2)
@@ -165,7 +180,7 @@ def run(grain: str, split: str, feature_set: str) -> None:
           f"{frame['station'].nunique()} stations; models: "
           + ", ".join(f"{m} ({frame.attrs['stages'][m]})" for m in models))
 
-    breakdowns = ["day_type", "school_hol", "month", "station", "road_type", "no2_level"]
+    breakdowns = ["day_type", "school_hol", "month", "station", "road_type", "traffic_level", "no2_level"]
     if grain == "hourly":
         breakdowns.insert(0, "hour")
     for by in breakdowns:

@@ -332,7 +332,17 @@ def save_result(
         results.append(row)
         temp_path = results_path.with_suffix(f".json.tmp{os.getpid()}")
         temp_path.write_text(json.dumps(results, indent=2, default=str))
-        os.replace(temp_path, results_path)
+        # Windows refuses the swap while another program (VS Code, File
+        # Explorer's preview pane, antivirus) briefly has results.json open,
+        # so retry for a few seconds instead of failing the whole run.
+        for attempt in range(40):
+            try:
+                os.replace(temp_path, results_path)
+                break
+            except PermissionError:
+                if attempt == 39:
+                    raise
+                time.sleep(0.25)
     return results_path
 
 

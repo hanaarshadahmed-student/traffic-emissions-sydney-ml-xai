@@ -131,7 +131,7 @@ something it needs is missing, it tells you which stage to run first.
 | `tune` | `scripts/tuning/tune_*.py` | Hyperparameter search for Ridge, decision tree, random forest, LSTM, GRU, XGBoost and SVR (daily only) — the recurrent models and random forest are the slow ones |
 | `evaluate` | `src/07_evaluation.py` | Summary table and charts comparing every method, per grain |
 | `explain` | `src/08_explainability.py` | SHAP on the tuned XGBoost: which features push NO₂ up or down, the traffic × wind interaction, and importance by road type, in `results/shap/` |
-| `analysis` | `src/09_bootstrap_ci.py` … `src/13_permutation_importance.py` | Extra checks (a few minutes): bootstrap confidence intervals, error analysis, leave-one-station-out, ablation, permutation importance — see [step 8](#8-find-the-outputs) |
+| `analysis` | `src/09_bootstrap_ci.py` … `src/14_holiday_check.py` | Extra checks (a few minutes): bootstrap confidence intervals, error analysis, leave-one-station-out, ablation, permutation importance, public-holiday natural experiment — see [step 8](#8-find-the-outputs) |
 
 ## 6. The methods
 
@@ -213,10 +213,14 @@ python run_pipeline.py --config config/my_experiment.yaml
 | `results/shap/interaction_traffic_wind_*` | Traffic effect on NO₂ at low / medium / high wind |
 | `results/shap/groups_by_road_type_*` | SHAP importance per road type (on train rows — the only split with 2+ stations per road type) |
 | `results/evaluation/bootstrap_*` | Test scores with 95% block-bootstrap confidence intervals, and which models are statistically tied with the best |
-| `results/error_analysis/` | Errors by hour, weekday/weekend, month, station, road type and NO₂ level |
+| `results/error_analysis/` | Errors by hour, weekday/weekend, month, station, road type, traffic level (quiet → busy for that road) and NO₂ level |
 | `results/loso/` | Leave-one-station-out: how well each model does at a station it never saw |
 | `results/ablation/` | Score change when each feature family (or sample weighting / feature pruning) is removed |
-| `results/permutation/` | Permutation importance per feature family, compared with SHAP |
+| `results/permutation/` | Permutation importance per feature family (and per part of traffic), compared with SHAP |
+| `results/holiday/` | Weekday public holidays vs normal weekdays: change in traffic and NO₂ at the same station, hour, month and weather |
+| `results/shap/traffic_parts_*` | SHAP importance of traffic split into volume, heavy vehicles, direction, traffic × time, unexpected traffic |
+| `results/shap/waterfall_*` | SHAP for single predictions: highest NO₂, typical, calm vs windy rush hour |
+| `results/shap/interactions_*` | SHAP interaction values: which feature pairs depend on each other (e.g. traffic × wind) |
 | `results/runs/` | A saved copy of every run with its config — see step 9 |
 
 The evaluate stage prints one summary table per grain (one row per method).

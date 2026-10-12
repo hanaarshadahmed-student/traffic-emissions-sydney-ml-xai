@@ -508,7 +508,45 @@ def add_traffic_features(df: pd.DataFrame, grain: str) -> pd.DataFrame:
             prior_std,
         ).where(prior_std.gt(0), 0.0)
 
+    df = add_unexpected_traffic_features(df, grain)
     return df.drop(columns="traffic_volume_light")
+
+
+def add_unexpected_traffic_features(df: pd.DataFrame, grain: str) -> pd.DataFrame:
+    """How far traffic is above or below what is NORMAL for this station at
+    this time of week -- the part of traffic the clock can't predict.
+
+    Traffic follows a strong daily/weekly rhythm, so plain traffic counts and
+    calendar features (hour, weekday) carry much the same information and a
+    model can swap one for the other. This feature removes that rhythm:
+
+        traffic_<total|heavy>_unexpected = log(1 + traffic) - log(1 + usual)
+
+    where `usual` is the station's average traffic in all EARLIER rows with
+    the same weekday and hour (hourly data) or the same weekday (daily data).
+    0 = a normal amount of traffic for that slot, +0.3 = about 35% more than
+    usual (e.g. an event or a diversion), -0.7 = about half (e.g. a public
+    holiday); capped at +-3. Only past rows are used, so nothing leaks from the future; the
+    first occurrence of each slot has no "usual" yet and is set to 0, with
+    `_available` = 0 to say so.
+
+    The ablation study (12_ablation.py, "traffic: unexpected only") uses it
+    to test whether traffic matters beyond time of day."""
+    slot = df["calendar_day_of_week"].astype(int)
+    if grain == "hourly":
+        slot = slot * 24 + df["hour_of_day"].astype(int)
+    keys = [df["station_id"], slot.rename("_slot")]
+    for column in ["traffic_volume_total", "traffic_volume_heavy"]:
+        prefix = column.removeprefix("traffic_volume_")
+        usual = df.groupby(keys, sort=False)[column].transform(
+            lambda values: values.shift(1).expanding(min_periods=1).mean()
+        )
+        # capped at +-3 (about 20x more / less than usual): beyond that it is a
+        # counter fault (e.g. an hour logged as 0 vehicles), not real traffic
+        surprise = (np.log1p(df[column].astype(float)) - np.log1p(usual)).clip(-3.0, 3.0)
+        df[f"traffic_{prefix}_unexpected_available"] = usual.notna().astype(np.int8)
+        df[f"traffic_{prefix}_unexpected"] = surprise.where(usual.notna(), 0.0)
+    return df
 
 
 def add_weather_features(df: pd.DataFrame) -> pd.DataFrame:

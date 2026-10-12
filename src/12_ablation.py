@@ -12,6 +12,15 @@ removed at a time and measures how much the validation score drops:
                          (traffic / wind etc.), so no traffic (or weather)
                          information is left in at all -- the fair test of
                          "does the model need traffic?"
+  - ALL traffic except unexpected
+                         every traffic feature removed EXCEPT "unexpected
+                         traffic" (traffic minus what is normal for that
+                         station / hour / weekday -- the part the clock can't
+                         predict). Compare with "- ALL traffic": a higher score
+                         means traffic matters beyond time of day (C1)
+  - traffic part: <part> one part of traffic removed (Total volume, Heavy
+                         vehicles, Direction of flow, Traffic x time,
+                         Unexpected traffic -- scripts/feature_families.py) (C2)
   - ALL traffic + Calendar
                          traffic AND calendar removed together. Traffic follows
                          a regular daily / weekly rhythm, so hour-of-day and
@@ -68,7 +77,7 @@ from scripts import paths  # noqa: E402
 from scripts.experiment_utils import (  # noqa: E402
     TABULAR_MODELS, build, fit_score, load_config, read_split, weight_column,
 )
-from scripts.feature_families import group_features  # noqa: E402
+from scripts.feature_families import group_features, group_traffic_parts  # noqa: E402
 from scripts.model_utils import get_feature_columns, load_excluded_features, load_manifest  # noqa: E402
 from scripts.models import display_name  # noqa: E402
 
@@ -92,6 +101,18 @@ def variants(grain: str, feature_set: str) -> list[tuple[str, list[str], bool]]:
     # stand in for it: removing both together shows whether they are substitutes
     if "ALL traffic" in removals and "Calendar" in groups:
         removals["ALL traffic + Calendar"] = removals["ALL traffic"] + groups["Calendar"]
+    # C1 -- does traffic matter BEYOND time of day? Keep calendar, weather and
+    # station, and keep only the "unexpected traffic" features (traffic minus
+    # what is normal for that station/hour/weekday, which the clock can't
+    # predict). Compare with "- ALL traffic": if this scores higher, traffic
+    # carries information the calendar can't supply.
+    parts = group_traffic_parts(features)
+    if "ALL traffic" in removals and "Unexpected traffic" in parts:
+        keep = set(parts["Unexpected traffic"])
+        removals["ALL traffic except unexpected"] = [f for f in removals["ALL traffic"] if f not in keep]
+    # C2 -- WHICH traffic factors matter: remove one part of traffic at a time
+    for part, cols in parts.items():
+        removals[f"traffic part: {part}"] = cols
     for family, cols in removals.items():
         if len(cols) < len(features):  # removing the only family would leave nothing
             out.append((f"- {family} ({len(cols)})", [f for f in features if f not in cols], True))
@@ -127,7 +148,7 @@ def run(grain: str, feature_sets: list[str], models: list[str], config: dict) ->
                              "test_r2_change": scores["test"]["r2"] - full["test"]["r2"],
                              "seconds": round(time.perf_counter() - started, 1)})
                 r = rows[-1]
-                print(f"  {variant:40s} {r['n_features']:4d} features   val R2 {r['val_r2']:6.3f} "
+                print(f"  {variant:44s} {r['n_features']:4d} features   val R2 {r['val_r2']:6.3f} "
                       f"({r['val_r2_change']:+.3f})   test R2 {r['test_r2']:6.3f} ({r['test_r2_change']:+.3f})",
                       flush=True)
     table = pd.DataFrame(rows)
