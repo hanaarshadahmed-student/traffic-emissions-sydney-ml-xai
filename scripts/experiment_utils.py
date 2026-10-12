@@ -19,7 +19,7 @@ import yaml
 
 from scripts import paths
 from scripts.model_utils import evaluate, fit_with_optional_weight, load_manifest
-from scripts.models import REGISTRY
+from models.models import REGISTRY
 
 TARGET = "no2_pphm"
 TABULAR_MODELS = ["ridge", "decision_tree", "random_forest", "xgboost", "svr"]

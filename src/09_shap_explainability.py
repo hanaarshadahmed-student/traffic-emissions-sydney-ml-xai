@@ -26,7 +26,7 @@ How to read the outputs:
   Features are scaled (05_train_test_split.py), so colours/axes in the plots
   show scaled values; compare high vs low, not absolute numbers.
 
-Outputs (results/shap/):
+Outputs (results/latest/shap/):
   importance_<grain>_<feature_set>.csv      every feature: importance, share, direction
   summary_<grain>_<feature_set>.png         beeswarm: effect and value, top features
   bar_<grain>_<feature_set>.png             mean |SHAP| bar chart, top features
@@ -47,9 +47,9 @@ traffic_dispersion_proxy = log traffic / (1 + wind speed)), so the "Traffic"
 share is pure traffic.
 
 Usage:
-    python src/08_explainability.py
-    python src/08_explainability.py --grain hourly --feature-set exogenous
-    python src/08_explainability.py --max-rows 20000 --top 20
+    python src/09_shap_explainability.py
+    python src/09_shap_explainability.py --grain hourly --feature-set exogenous
+    python src/09_shap_explainability.py --max-rows 20000 --top 20
 Or as part of:   python run_pipeline.py --stage explain
 Needs the `shap` package (pip install shap).
 """
@@ -77,7 +77,7 @@ from scripts.model_utils import (  # noqa: E402
     load_split,
 )
 from scripts.feature_families import FAMILIES, family_of, traffic_part  # noqa: E402,F401
-from scripts.models import build_model  # noqa: E402
+from models.models import build_model  # noqa: E402
 from scripts.stations import station_label  # noqa: E402
 
 OUT_DIR = paths.SHAP_DIR

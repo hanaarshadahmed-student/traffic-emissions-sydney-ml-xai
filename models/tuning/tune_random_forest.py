@@ -1,13 +1,22 @@
-"""Tune Ridge regression (alpha) on the shared scaled tabular dataset.
+"""Tune the random forest on the shared scaled tabular dataset.
 
-Ridge has a single setting, alpha, that shrinks the coefficients: small alpha
-is close to ordinary linear regression, large alpha gives a simpler model that
-overfits less. Every alpha listed in config/tuning.yaml is tried; the winner
-is chosen on the validation split only, and the test split is scored once
-afterwards (never tuned on).
+A random forest averages many decision trees, each trained on a random sample
+of rows and features. The settings searched here (see config/tuning.yaml):
+  n_estimators      how many trees (more = steadier, slower)
+  max_depth         how deep each tree may grow (null = no limit)
+  min_samples_leaf  the fewest rows allowed in a final leaf (bigger = simpler)
+  max_features      share of the features each split may look at (smaller =
+                    more varied trees, and faster)
+The first candidates are the config.yaml settings, then a few hand-picked
+ones, then random draws from the search space. The winner is chosen on the
+validation split only; test is scored once afterwards.
 
-Run on its own:   python scripts/tuning/tune_ridge.py
-Or as part of:    python run_pipeline.py --stage tune --models ridge
+A forest already uses every CPU core while it trains (n_jobs: -1), so the
+candidates are tried one after another. Hourly forests take about a minute
+each, so keep n_trials small for that grain -- tuning is the slow stage.
+
+Run on its own:   python models/tuning/tune_random_forest.py
+Or as part of:    python run_pipeline.py --stage tune --models random_forest
 """
 
 from __future__ import annotations
@@ -24,7 +33,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts import paths  # noqa: E402
-from scripts.tuning.common import (  # noqa: E402
+from models.tuning.common import (  # noqa: E402
     ROOT_DIR,
     build_candidates,
     build_learning_curves,
@@ -34,7 +43,7 @@ from scripts.tuning.common import (  # noqa: E402
     save_overfitting_diagnostics,
     save_train_and_test_results,
 )
-from scripts.models import build_model as _build_model  # noqa: E402
+from models.models import build_model as _build_model  # noqa: E402
 from scripts.model_utils import (  # noqa: E402
     Timer,
     evaluate_per_station,
@@ -45,7 +54,7 @@ from scripts.model_utils import (  # noqa: E402
     save_result,
 )
 
-MODEL = "ridge"
+MODEL = "random_forest"
 DEFAULT_CONFIG_PATH = paths.TUNING_CONFIG_PATH
 
 
@@ -111,7 +120,10 @@ def save_model_outputs(model, grain, feature_set, split, metrics, predictions, y
         "tuning_seconds": round(tuning_seconds, 3),
         "model_path": str(model_path.relative_to(ROOT_DIR)),
         **learning_curve_paths,
-        "best_alpha": model_params["alpha"],
+        "best_n_estimators": model_params.get("n_estimators"),
+        "best_max_depth": model_params.get("max_depth"),
+        "best_min_samples_leaf": model_params.get("min_samples_leaf"),
+        "best_max_features": model_params.get("max_features"),
     }
 
 
@@ -135,10 +147,12 @@ def run_experiment(grain: str, feature_set: str, config: dict, candidates: list[
         )
         trials.append({"grain": grain, "feature_set": feature_set, "split": split,
                        "trial": trial_number, **params, **metrics})
+        shown = " ".join(f"{k}={v}" for k, v in params.items())
         print(
             f"{grain:6s} | {feature_set:14s} | trial {trial_number:02d}/{len(candidates):02d} | "
-            f"alpha={params['alpha']:<9g} | RMSE={metrics['rmse']:.4f} | MAE={metrics['mae']:.4f} | "
-            f"R2={metrics['r2']:.4f} | R2 gap={metrics['r2_gap']:.4f} | risk={metrics['overfitting_risk']}",
+            f"RMSE={metrics['rmse']:.4f} | MAE={metrics['mae']:.4f} | R2={metrics['r2']:.4f} | "
+            f"R2 gap={metrics['r2_gap']:.4f} | risk={metrics['overfitting_risk']} | "
+            f"{metrics['train_seconds']:.0f}s | {shown}",
             flush=True,
         )
         if best_run is None or metrics[selection_metric] < best_run["metrics"][selection_metric]:
@@ -177,11 +191,11 @@ def main() -> None:
     config = load_config(args.config, MODEL)
     grains = grains_to_tune(MODEL, config, args.main_config)
     if not grains:
-        print("Ridge tuning skipped -- disabled in tuning.yaml, not enabled under "
+        print("Random forest tuning skipped -- disabled in tuning.yaml, not enabled under "
               "training.models, or none of its grains are in this run.")
         return
     candidates = build_candidates(config)
-    print(f"Ridge tuning: grains {grains}, {len(candidates)} alpha values per grain and feature set",
+    print(f"Random forest tuning: grains {grains}, {len(candidates)} trials per grain and feature set",
           flush=True)
 
     summaries, trials = [], []
@@ -194,13 +208,14 @@ def main() -> None:
     paths.TUNING_DIR.mkdir(parents=True, exist_ok=True)
     summary_frame = pd.DataFrame(summaries).sort_values(["grain", "rmse"])
     trials_frame = pd.DataFrame(trials).sort_values(["grain", "feature_set", "rmse"])
-    summary_frame.to_csv(paths.TUNING_DIR / "ridge_tuned_metrics.csv", index=False)
-    trials_frame.to_csv(paths.TUNING_DIR / "ridge_tuning_trials.csv", index=False)
+    summary_frame.to_csv(paths.TUNING_DIR / "random_forest_tuned_metrics.csv", index=False)
+    trials_frame.to_csv(paths.TUNING_DIR / "random_forest_tuning_trials.csv", index=False)
     save_overfitting_diagnostics(summary_frame, MODEL)
 
     display_columns = ["grain", "feature_set", "n_features", "rmse", "mae", "r2", "train_r2",
-                       "r2_gap", "overfitting_risk", "best_alpha"]
-    print("\nBest Ridge validation results")
+                       "r2_gap", "overfitting_risk", "best_n_estimators", "best_max_depth",
+                       "best_min_samples_leaf", "best_max_features"]
+    print("\nBest random forest validation results")
     print(summary_frame[display_columns].to_string(index=False))
 
 

@@ -10,15 +10,15 @@ config/config.yaml:
        B2. naive_seasonal_climatology  NO2 = the station's train-period
                                        average for that month (and hour)
 
-  B. ML MODELS (training.models, defined in scripts/models.py):
+  B. ML MODELS (training.models, defined in models/models.py):
        1. ridge  2. decision_tree  3. random_forest  4. xgboost  5. svr
-       6. lstm  7. gru (sequence models -- scripts/lstm.py / scripts/gru.py)
+       6. lstm  7. gru (sequence models -- models/sequence_models.py)
 
 Every ML model is trained on the train split once per feature set and
 scored on every split in report_splits, the exact same way -- that logic
 lives here and in model_utils.py, once.
 
-Results are upserted into results/results.json via model_utils.save_result(),
+Results are upserted into results/latest/results.json via model_utils.save_result(),
 keyed on (model, stage, grain, feature_set, split). stage="default" here
 (the model's default settings from config.yaml); the tuning scripts write
 stage="tuned". Re-running after a config change overwrites just that
@@ -26,7 +26,7 @@ model's rows, it doesn't duplicate or wipe anyone else's.
 
 To turn a model on/off, change its hyperparameters, or switch grain /
 feature sets / split: edit config/config.yaml. To add a new model
-entirely: see scripts/models.py.
+entirely: see models/models.py.
 
 Usage:
     python src/06_run_models.py
@@ -60,7 +60,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts import paths  # noqa: E402
-from scripts.models import BASELINE_METHODS, REGISTRY, display_name  # noqa: E402
+from models.models import BASELINE_METHODS, REGISTRY, display_name  # noqa: E402
 from scripts.model_utils import (  # noqa: E402
     SPLITS_DIR,
     Timer,
@@ -110,7 +110,7 @@ def run_one(
     worst-station printout (val while iterating)."""
     if name not in REGISTRY:
         raise KeyError(
-            f"'{name}' isn't registered in scripts/models.py. "
+            f"'{name}' isn't registered in models/models.py. "
             f"Known models: {sorted(REGISTRY)}"
         )
     eval_splits = list(dict.fromkeys([*report_splits, split]))  # ordered, no dupes
@@ -135,8 +135,8 @@ def run_one(
 def run_sequence_model(name, model, grain, feature_set, split, eval_splits) -> dict:
     """Models that read a window of past time steps (LSTM and GRU). Same feature
     columns, rows, weights and scoring as the tabular models -- only the
-    input shape differs. See scripts/lstm.py."""
-    from scripts.lstm import build_sequences
+    input shape differs. See models/sequence_models.py."""
+    from models.sequence_models import build_sequences
 
     frames = {
         s: pd.read_csv(SPLITS_DIR / f"{grain}_{s}.csv", dtype={"station_id": str}, low_memory=False)
@@ -324,7 +324,7 @@ def main():
         "--worst-stations", type=int, default=3,
         help="How many lowest-R2 stations to print per run (0 to disable). "
              "Full breakdown is always saved to "
-             "results/per_station/ regardless.",
+             "results/latest/per_station/ regardless.",
     )
     parser.add_argument(
         "--jobs", type=int, default=1,

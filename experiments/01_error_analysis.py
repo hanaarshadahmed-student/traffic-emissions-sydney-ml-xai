@@ -2,7 +2,7 @@
 CO2/NO2 Traffic-Emissions Capstone -- Error analysis
 
 WHEN do the models get NO2 wrong? Breaks the saved row-by-row predictions
-(results/predictions/) down by time of day, day type, month, station, road
+(results/latest/predictions/) down by time of day, day type, month, station, road
 type and pollution level. Nothing is retrained.
 
 Error measures, all in pphm:
@@ -30,14 +30,14 @@ Which models: every model with saved predictions for --feature-set (default
 "all"), tuned version where available, plus the B1 persistence baseline for
 reference.
 
-Outputs (results/error_analysis/):
+Outputs (results/experiments/error_analysis/):
   errors_<grain>_<split>_<feature_set>_<breakdown>.csv
   errors_<grain>_<split>_<feature_set>_<breakdown>.png   RMSE (and bias) per group
 
 Usage:
-    python src/10_error_analysis.py                   # both grains, test split, all features
-    python src/10_error_analysis.py --grain hourly --feature-set exogenous
-Run AFTER the pipeline (needs results/predictions/ and data/processed/splits/).
+    python experiments/01_error_analysis.py                   # both grains, test split, all features
+    python experiments/01_error_analysis.py --grain hourly --feature-set exogenous
+Run AFTER the pipeline (needs results/latest/predictions/ and data/processed/splits/).
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts import paths  # noqa: E402
 from scripts.stations import station_label  # noqa: E402
 
-OUT_DIR = paths.RESULTS_DIR / "error_analysis"
+OUT_DIR = paths.ERROR_ANALYSIS_DIR
 DISPLAY = {
     "naive_persistence": "B1 Persistence",
     "ridge": "Ridge", "decision_tree": "Decision tree", "random_forest": "Random forest",

@@ -2,7 +2,7 @@
 CO2/NO2 Traffic-Emissions Capstone -- Public-holiday natural experiment
 
 Traffic and time of day move together (rush hour), so the models can't
-fully tell them apart (see 12_ablation.py). Weekday public holidays break
+fully tell them apart (see experiments/03_ablation.py). Weekday public holidays break
 that link: the clock and the calendar look like a normal weekday, but much
 less traffic is on the road. If NO2 also drops on those days -- at the same
 station, hour and time of year, in similar weather -- that is evidence that
@@ -30,14 +30,14 @@ than proves a traffic effect.
 
 Reads data/processed/features_<grain>.csv (unscaled). Nothing is trained.
 
-Outputs (results/holiday/):
+Outputs (results/experiments/holiday/):
   holiday_<grain>_by_station.csv   raw averages per station, holiday vs control
   holiday_<grain>_effect.csv       adjusted holiday effect on traffic and NO2, with 95% CI
   holiday_hourly_profile.png/.csv  holiday minus control by hour of day
 
 Usage:
-    python src/14_holiday_check.py                 # both grains
-    python src/14_holiday_check.py --grain hourly
+    python experiments/04_holiday_check.py                 # both grains
+    python experiments/04_holiday_check.py --grain hourly
 Run AFTER the pipeline's data stages (needs data/processed/).
 """
 
@@ -59,7 +59,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts import paths  # noqa: E402
 from scripts.stations import add_station_name, station_label  # noqa: E402
 
-OUT_DIR = paths.RESULTS_DIR / "holiday"
+OUT_DIR = paths.HOLIDAY_DIR
 WINDOW_DAYS = 14
 WEATHER = ["wind_speed_ms", "temp_c", "humidity_pct", "rain_mm"]
 

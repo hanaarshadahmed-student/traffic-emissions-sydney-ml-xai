@@ -1,9 +1,9 @@
 """
 CO2/NO2 Traffic-Emissions Capstone -- Shared modeling utilities
 
-06_run_models.py and the tuning scripts (scripts/tuning/) import from here
+06_run_models.py and the tuning scripts (models/tuning/) import from here
 to load data, score predictions, and save results -- so every model in
-scripts/models.py trains and is evaluated the exact same way.
+models/models.py trains and is evaluated the exact same way.
 
 Usage:
 
@@ -157,7 +157,7 @@ def evaluate_per_station(y_true, y_pred, station_ids: pd.Series) -> pd.DataFrame
     worst-R2-first. Useful for telling apart "the features genuinely
     don't generalize" from "one or two short-history stations (e.g.
     6178-PR at ~60 rows total) are dragging the aggregate score down" --
-    see the ridge note in scripts/models.py for why that distinction matters.
+    see the ridge note in models/models.py for why that distinction matters.
 
     Stations with fewer than 5 eval rows get R2 = NaN rather than a
     number: R2 computed on 2-4 points is noise, not a real error metric,
@@ -189,7 +189,7 @@ def evaluate_per_station(y_true, y_pred, station_ids: pd.Series) -> pd.DataFrame
 # (baselines, 06_run_models.py and all the tuning scripts) passes its result
 # straight to save_per_station(). So the predictions are parked here, keyed
 # by a small tag on the per-station table, and save_per_station() writes them
-# to results/predictions/ -- no changes needed in any caller. Only a short
+# to results/latest/predictions/ -- no changes needed in any caller. Only a short
 # id goes in .attrs (not the arrays), so pandas can still compare/concat the
 # per-station tables safely.
 _PREDICTION_CACHE: dict[int, pd.DataFrame] = {}
@@ -219,7 +219,7 @@ def save_per_station(
     stations are driving a low aggregate score.
 
     Also writes the row-by-row predictions behind it to
-    results/predictions/<same name>.csv.gz (columns: row, station_id,
+    results/latest/predictions/<same name>.csv.gz (columns: row, station_id,
     y_true, y_pred), used for bootstrap confidence intervals and error
     analysis. `row` is the row's position in data/processed/splits/
     <grain>_<split>.csv. Train-split predictions are skipped (large, and
@@ -292,18 +292,18 @@ def save_result(
     split: str = "val",
     stage: str = "default",
 ) -> Path:
-    """Upserts one run's metrics into results/results.json,
+    """Upserts one run's metrics into results/latest/results.json,
     keyed on (model, stage, grain, feature_set, split).
 
     `stage` separates a model's untuned run with the config's settings
     (stage="default", 06_run_models.py)
-    from its tuned run (scripts/tuning/*), so tuning XGBoost no longer
+    from its tuned run (models/tuning/*), so tuning XGBoost no longer
     overwrites the XGBoost default row -- both are kept, and
     07_evaluation.py shows them side by side.
 
     When run through run_pipeline.py the row also gets a `run_id`, linking
     it to results/runs/<run_id>/ (config, manifests, log)."""
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    paths.RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
     results_path = paths.RESULTS_PATH
     row = {
         "model": model_name,

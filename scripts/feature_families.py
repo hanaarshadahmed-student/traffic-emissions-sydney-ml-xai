@@ -2,7 +2,7 @@
 Feature families -- which group each model feature belongs to (NO2 history,
 traffic, weather, calendar, road/station...).
 
-Defined once here so SHAP (src/08_explainability.py), permutation importance
+Defined once here so SHAP (src/09_shap_explainability.py), permutation importance
 and the ablation study all group features the same way.
 
 Matched on the feature name; the FIRST family whose keyword appears in the

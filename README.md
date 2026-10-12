@@ -40,6 +40,8 @@ Press **Ctrl+C once** to stop a run. Keep the laptop plugged in and awake.
 
 ## What a run does
 
+**Main pipeline** (`src/`, always runs):
+
 | Stage | Script | What it does |
 |---|---|---|
 | `ingest` | `01_data_ingestion.py` | Joins raw traffic, weather and NO₂ into a daily and an hourly dataset |
@@ -48,50 +50,55 @@ Press **Ctrl+C once** to stop a run. Keep the laptop plugged in and awake.
 | `features` | `04_feature_engineering.py` | Lags, rolling means, traffic × weather, calendar features |
 | `split` | `05_train_test_split.py` | Splits by date: 70% train / 15% validation / 15% test |
 | `train` | `06_run_models.py` | Baselines + every ML model, both grains, 3 feature sets |
-| `tune` | `scripts/tuning/` | Random search per model, chosen on validation (the slow stage) |
-| `evaluate` | `07_evaluation.py` | Comparison tables and charts |
-| `explain` | `08_explainability.py` | SHAP on the tuned XGBoost |
-| `analysis` | `09` – `15` | Confidence intervals, error analysis, unseen stations, ablation, permutation importance, public-holiday check, top-3 model comparison |
+| `tune` | `models/tuning/` | Random search per model, chosen on validation (the slow stage) |
+| `evaluate` | `07_evaluation.py`, `08_bootstrap_ci.py` | Comparison tables and charts, with 95% confidence intervals |
+| `explain` | `09_shap_explainability.py`, `10_permutation_importance.py` | SHAP on the tuned XGBoost; permutation importance on the top 3 models |
 
-All scripts are in `src/`. **Methods:** B1 persistence and B2 seasonal
-average (baselines), Ridge, decision tree, random forest, XGBoost, SVR
-(daily only), LSTM, GRU (hourly only). **Feature sets:** `exogenous`
-(traffic, weather, calendar, station — no NO₂ history), `autoregressive`
-(NO₂ history only), `all`.
+**Experiments** (`experiments/`, only with `--experiments`): robustness checks.
+
+| Script | Question |
+|---|---|
+| `01_error_analysis.py` | When and where are the errors largest? |
+| `02_leave_one_station_out.py` | Does the model work at a station it has never seen? |
+| `03_ablation.py` | What happens if a feature group is removed and the model retrained? |
+| `04_holiday_check.py` | Does less traffic (weekday public holidays) mean less NO₂? |
+
+**Methods:** B1 persistence and B2 seasonal average (baselines), Ridge,
+decision tree, random forest, XGBoost, SVR (daily only), LSTM, GRU (hourly
+only). **Feature sets:** `exogenous` (traffic, weather, calendar, station —
+no NO₂ history), `autoregressive` (NO₂ history only), `all`.
 
 ---
 
 ## Where the results are
 
-Everything goes in `results/`. Each run is also saved in
-`results/runs/<date>_<name>/` with its exact config, scores and log.
-
 | Folder | What it answers | Start with |
 |---|---|---|
-| `evaluation/` | Which model is best? (with 95% confidence intervals) | `summary_<grain>.png`, `bootstrap_<grain>_test.png` |
-| `shap/` | What drives NO₂, and how? | `summary_<grain>_exogenous.png`, `traffic_parts_*`, `waterfall_*` |
-| `permutation/` | Does a second method agree with SHAP? Do the top 3 models (incl. LSTM / GRU) rely on the same drivers? | `permutation_families_*.csv`, `top3_<grain>_<set>.png`, `top3_agreement_*.csv` |
-| `ablation/` | What happens if a feature group is removed? | `ablation_<grain>.png` |
-| `holiday/` | Does less traffic (public holidays) mean less NO₂? | `holiday_hourly_profile.png` |
-| `loso/` | Does the model work at a station it has never seen? | `loso_<grain>_exogenous.png` |
-| `error_analysis/` | When and where are the errors largest? | `errors_*_traffic_level.png`, `errors_*_no2_level.png` |
-| `tuning/` | Tuning trials, learning curves | `<model>_tuned_metrics.csv` |
-| `per_station/`, `predictions/` | Raw per-station scores and row-by-row predictions (used by the analysis stage) | — |
+| `results/latest/evaluation/` | Which model is best? (with 95% confidence intervals) | `summary_<grain>.png`, `bootstrap_<grain>_test.png` |
+| `results/latest/shap/` | What drives NO₂, and how? | `summary_<grain>_exogenous.png`, `traffic_parts_*`, `waterfall_*` |
+| `results/latest/permutation/` | Does a second method agree with SHAP? Do the top 3 models (incl. LSTM / GRU) rely on the same drivers? | `top3_<grain>_<set>.png`, `top3_agreement_*.csv` |
+| `results/latest/tuning/` | Tuning trials, learning curves | `<model>_tuned_metrics.csv` |
+| `results/latest/per_station/`, `predictions/` | Raw per-station scores and row-by-row predictions | — |
+| `results/experiments/` | `error_analysis/`, `loso/`, `ablation/`, `holiday/` | `errors_*_traffic_level.png`, `loso_<grain>_exogenous.png`, `holiday_hourly_profile.png` |
+| `results/sensitivity/<name>/` | The same folders for one sensitivity run | `latest/evaluation/summary_*.png` |
+| `results/saved_models/` | Fitted tuned models (reused by `explain`) | — |
+| `results/runs/` | A saved copy of every run: config, scores, log, outputs | `index.csv` |
 
 Stations appear as id + road + suburb, e.g. `7212 Stewart Ave, Newcastle West`.
 
 ---
 
-## Running less
+## Running more or less
 
 | Option | Effect |
 |---|---|
+| `--experiments` | Also run the experiments |
 | `--no-tune` | Skip tuning (much faster) |
-| `--no-analysis` | Skip the analysis stage |
 | `--grain daily` / `hourly` | One grain only |
 | `--models ridge xgboost` | Only these ML models (baselines always run) |
-| `--stage explain` | One stage only, reusing what's already built |
+| `--stage explain` | One stage only, reusing what's already built (`--stage experiments` for the experiments) |
 | `--jobs N` | Models trained at the same time |
+| `--sensitivity <name>` | A sensitivity run (see below) |
 | `--config <file>` | Use another config file |
 | `--name <label>` / `--no-save` | Name the saved run / don't save it |
 
@@ -102,11 +109,12 @@ Stations appear as id + road + suburb, e.g. `7212 Stewart Ave, Newcastle West`.
 - **`config/config.yaml`** — which stages, grains, feature sets and models
   run, model settings, station exclusions, SHAP options.
 - **`config/tuning.yaml`** — tuning trials and search ranges.
-- **Sensitivity runs** — same as the main config with one change each:
-  `no2_clipped.yaml` (negative NO₂ set to 0), `no_exclusions.yaml`
-  (Port Macquarie stations kept), `no_mub001.yaml` (MUB001 left out). Run
-  with e.g. `python run_pipeline.py --config config/no2_clipped.yaml --no-tune --name sens_no2_clipped`.
-  **A full run afterwards is needed** to rebuild the main data.
+- **`config/sensitivity.yaml`** — sensitivity runs, each listing only what it
+  changes: `no2_clipped` (negative NO₂ set to 0), `no_exclusions` (Port
+  Macquarie stations kept), `no_mub001` (MUB001 left out). Run with e.g.
+  `python run_pipeline.py --sensitivity no2_clipped`. They use their own
+  folders (`data/processed_sensitivity/`, `results/sensitivity/`), so the
+  main data and results are never overwritten.
 
 ---
 
@@ -156,11 +164,13 @@ python run_pipeline.py --config results/runs/<run>/config.yaml
 ## Project layout
 
 ```
-config/          config.yaml, tuning.yaml, sensitivity configs
+config/          config.yaml, tuning.yaml, sensitivity.yaml
 data/            Data.md, raw/ (inputs), processed/ (rebuilt each run)
-notebooks/       01_data_exploration.ipynb
-results/         all outputs and saved runs
-scripts/         shared code: stations, paths, models, LSTM/GRU, tuning
-src/             pipeline stages 01-15
+notebooks/       exploratory analysis
+models/          the models (models.py, sequence_models.py = LSTM + GRU) and tuning/
+scripts/         shared helpers: paths, stations, feature families, scoring, run records
+src/             main pipeline, stages 01-10
+experiments/     robustness checks 01-04
+results/         all outputs (latest/, experiments/, sensitivity/, saved_models/, runs/)
 run_pipeline.py  runs everything
 ```

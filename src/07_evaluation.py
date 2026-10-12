@@ -1,7 +1,7 @@
 """
 CO2/NO2 Traffic-Emissions Capstone -- Stage 07: Evaluation / method comparison
 
-Reads results/results.json (nothing is retrained, so it's instant) and
+Reads results/latest/results.json (nothing is retrained, so it's instant) and
 compares every method, grouped by type:
 
   Baseline methods (not ML -- the bar to beat)
@@ -19,7 +19,7 @@ What it prints (per grain):
             (train >> val = overfitting; val ~= test = val was a fair
             stand-in for unseen data).
 
-Outputs (results/evaluation/):
+Outputs (results/latest/evaluation/):
   summary_<grain>.csv / .png        the summary table + chart (start here)
   train_val_test_<grain>.csv / .png the full detail table + chart
   stage_delta_<grain>.csv           tuned minus default, when tuning has run
@@ -52,7 +52,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts import paths  # noqa: E402
-from scripts.models import BASELINE_METHODS, REGISTRY, display_name, model_type  # noqa: E402
+from models.models import BASELINE_METHODS, REGISTRY, display_name, model_type  # noqa: E402
 
 ROOT_DIR = paths.ROOT_DIR
 RESULTS_PATH = paths.RESULTS_PATH

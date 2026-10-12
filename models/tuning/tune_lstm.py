@@ -19,7 +19,7 @@ The winner is chosen on validation only; test is scored once afterwards.
 Learning curves are skipped for the LSTM (they'd mean re-training it five more
 times per feature set).
 
-Run on its own:   python scripts/tuning/tune_lstm.py
+Run on its own:   python models/tuning/tune_lstm.py
 Or as part of:    python run_pipeline.py --stage tune --models lstm
 Needs PyTorch (pip install torch).
 """
@@ -37,7 +37,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts import paths  # noqa: E402
-from scripts.tuning.common import (  # noqa: E402
+from models.tuning.common import (  # noqa: E402
     ROOT_DIR,
     build_candidates,
     evaluate_generalization,
@@ -71,7 +71,7 @@ def read_frames(grain: str) -> dict[str, pd.DataFrame]:
 def run_experiment(grain, feature_set, config, candidates, frames, main_params):
     import torch
 
-    from scripts.lstm import LSTMRegressor, build_sequences
+    from models.sequence_models import LSTMRegressor, build_sequences
 
     split = config["split"]
     selection_metric = config["selection_metric"]
@@ -126,7 +126,7 @@ def run_experiment(grain, feature_set, config, candidates, frames, main_params):
     paths.SAVED_MODELS_DIR.mkdir(parents=True, exist_ok=True)
     model_path = paths.SAVED_MODELS_DIR / f"{MODEL}_{grain}_{feature_set}.pt"
     # saved with its settings, target scaling and feature list (same format as
-    # the GRU) so src/15_top_models_permutation.py can reload it
+    # the GRU) so src/10_permutation_importance.py can reload it
     torch.save(
         {
             "state_dict": best.network_.state_dict(),

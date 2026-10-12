@@ -10,12 +10,12 @@ from pathlib import Path
 import joblib
 import pandas as pd
 
-# Run as a script (python scripts/tuning/tune_xgboost.py), so put the repo
+# Run as a script (python models/tuning/tune_xgboost.py), so put the repo
 # root on the import path to reach the shared code in scripts/.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts import paths  # noqa: E402
-from scripts.tuning.common import (  # noqa: E402
+from models.tuning.common import (  # noqa: E402
     ROOT_DIR,
     build_candidates,
     build_learning_curves,
@@ -25,7 +25,7 @@ from scripts.tuning.common import (  # noqa: E402
     save_overfitting_diagnostics,
     save_train_and_test_results,
 )
-from scripts.models import build_model as _build_model  # noqa: E402
+from models.models import build_model as _build_model  # noqa: E402
 from scripts.model_utils import (  # noqa: E402
     Timer,
     evaluate_per_station,

@@ -530,7 +530,7 @@ def add_unexpected_traffic_features(df: pd.DataFrame, grain: str) -> pd.DataFram
     first occurrence of each slot has no "usual" yet and is set to 0, with
     `_available` = 0 to say so.
 
-    The ablation study (12_ablation.py, "traffic: unexpected only") uses it
+    The ablation study (experiments/03_ablation.py, "traffic: unexpected only") uses it
     to test whether traffic matters beyond time of day."""
     slot = df["calendar_day_of_week"].astype(int)
     if grain == "hourly":

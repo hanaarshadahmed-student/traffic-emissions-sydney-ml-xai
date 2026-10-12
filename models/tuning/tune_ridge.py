@@ -1,17 +1,13 @@
-"""Tune the decision tree on the shared scaled tabular dataset.
+"""Tune Ridge regression (alpha) on the shared scaled tabular dataset.
 
-A single tree overfits easily: left alone it memorises the training rows. The
-settings searched here all limit that --
-  max_depth          how many questions deep the tree may go
-  min_samples_leaf   the fewest rows allowed in a final leaf
-  min_samples_split  the fewest rows needed to split a branch further
-  ccp_alpha          prunes branches that add little (0 = no pruning)
-The first candidates tried are the config.yaml settings, then a few hand-picked
-ones, then random draws from the search space in config/tuning.yaml. The winner
-is chosen on the validation split only; test is scored once afterwards.
+Ridge has a single setting, alpha, that shrinks the coefficients: small alpha
+is close to ordinary linear regression, large alpha gives a simpler model that
+overfits less. Every alpha listed in config/tuning.yaml is tried; the winner
+is chosen on the validation split only, and the test split is scored once
+afterwards (never tuned on).
 
-Run on its own:   python scripts/tuning/tune_decision_tree.py
-Or as part of:    python run_pipeline.py --stage tune --models decision_tree
+Run on its own:   python models/tuning/tune_ridge.py
+Or as part of:    python run_pipeline.py --stage tune --models ridge
 """
 
 from __future__ import annotations
@@ -23,13 +19,12 @@ from pathlib import Path
 
 import joblib
 import pandas as pd
-from joblib import Parallel, delayed
 
 # Run as a script, so put the repo root on the import path to reach scripts/.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts import paths  # noqa: E402
-from scripts.tuning.common import (  # noqa: E402
+from models.tuning.common import (  # noqa: E402
     ROOT_DIR,
     build_candidates,
     build_learning_curves,
@@ -39,7 +34,7 @@ from scripts.tuning.common import (  # noqa: E402
     save_overfitting_diagnostics,
     save_train_and_test_results,
 )
-from scripts.models import build_model as _build_model  # noqa: E402
+from models.models import build_model as _build_model  # noqa: E402
 from scripts.model_utils import (  # noqa: E402
     Timer,
     evaluate_per_station,
@@ -50,7 +45,7 @@ from scripts.model_utils import (  # noqa: E402
     save_result,
 )
 
-MODEL = "decision_tree"
+MODEL = "ridge"
 DEFAULT_CONFIG_PATH = paths.TUNING_CONFIG_PATH
 
 
@@ -116,11 +111,7 @@ def save_model_outputs(model, grain, feature_set, split, metrics, predictions, y
         "tuning_seconds": round(tuning_seconds, 3),
         "model_path": str(model_path.relative_to(ROOT_DIR)),
         **learning_curve_paths,
-        "best_max_depth": model_params.get("max_depth"),
-        "best_min_samples_leaf": model_params.get("min_samples_leaf"),
-        "best_min_samples_split": model_params.get("min_samples_split"),
-        "best_ccp_alpha": model_params.get("ccp_alpha"),
-        "n_leaves": int(model.get_n_leaves()),
+        "best_alpha": model_params["alpha"],
     }
 
 
@@ -137,25 +128,17 @@ def run_experiment(grain: str, feature_set: str, config: dict, candidates: list[
 
     trials, best_run = [], None
     tuning_start = time.perf_counter()
-    # A tree fits on one core, but candidates are independent, so fit them side
-    # by side (n_jobs in tuning.yaml; -1 = all cores).
-    fitted = Parallel(n_jobs=config.get("n_jobs", -1))(
-        delayed(train_candidate)(
+    for trial_number, params in enumerate(candidates, start=1):
+        model, predictions, metrics, model_params = train_candidate(
             params, config["fixed_params"], X_train, y_train, sample_weight,
             X_val, y_val, config["overfitting_thresholds"],
         )
-        for params in candidates
-    )
-    for trial_number, (params, (model, predictions, metrics, model_params)) in enumerate(
-        zip(candidates, fitted), start=1
-    ):
         trials.append({"grain": grain, "feature_set": feature_set, "split": split,
                        "trial": trial_number, **params, **metrics})
-        shown = " ".join(f"{k}={v}" for k, v in params.items())
         print(
             f"{grain:6s} | {feature_set:14s} | trial {trial_number:02d}/{len(candidates):02d} | "
-            f"RMSE={metrics['rmse']:.4f} | MAE={metrics['mae']:.4f} | R2={metrics['r2']:.4f} | "
-            f"R2 gap={metrics['r2_gap']:.4f} | risk={metrics['overfitting_risk']} | {shown}",
+            f"alpha={params['alpha']:<9g} | RMSE={metrics['rmse']:.4f} | MAE={metrics['mae']:.4f} | "
+            f"R2={metrics['r2']:.4f} | R2 gap={metrics['r2_gap']:.4f} | risk={metrics['overfitting_risk']}",
             flush=True,
         )
         if best_run is None or metrics[selection_metric] < best_run["metrics"][selection_metric]:
@@ -194,11 +177,11 @@ def main() -> None:
     config = load_config(args.config, MODEL)
     grains = grains_to_tune(MODEL, config, args.main_config)
     if not grains:
-        print("Decision tree tuning skipped -- disabled in tuning.yaml, not enabled under "
+        print("Ridge tuning skipped -- disabled in tuning.yaml, not enabled under "
               "training.models, or none of its grains are in this run.")
         return
     candidates = build_candidates(config)
-    print(f"Decision tree tuning: grains {grains}, {len(candidates)} trials per grain and feature set",
+    print(f"Ridge tuning: grains {grains}, {len(candidates)} alpha values per grain and feature set",
           flush=True)
 
     summaries, trials = [], []
@@ -211,17 +194,15 @@ def main() -> None:
     paths.TUNING_DIR.mkdir(parents=True, exist_ok=True)
     summary_frame = pd.DataFrame(summaries).sort_values(["grain", "rmse"])
     trials_frame = pd.DataFrame(trials).sort_values(["grain", "feature_set", "rmse"])
-    summary_frame.to_csv(paths.TUNING_DIR / "decision_tree_tuned_metrics.csv", index=False)
-    trials_frame.to_csv(paths.TUNING_DIR / "decision_tree_tuning_trials.csv", index=False)
+    summary_frame.to_csv(paths.TUNING_DIR / "ridge_tuned_metrics.csv", index=False)
+    trials_frame.to_csv(paths.TUNING_DIR / "ridge_tuning_trials.csv", index=False)
     save_overfitting_diagnostics(summary_frame, MODEL)
 
     display_columns = ["grain", "feature_set", "n_features", "rmse", "mae", "r2", "train_r2",
-                       "r2_gap", "overfitting_risk", "best_max_depth", "best_min_samples_leaf",
-                       "best_min_samples_split", "best_ccp_alpha", "n_leaves"]
-    print("\nBest decision tree validation results")
+                       "r2_gap", "overfitting_risk", "best_alpha"]
+    print("\nBest Ridge validation results")
     print(summary_frame[display_columns].to_string(index=False))
 
 
 if __name__ == "__main__":
     main()
-    

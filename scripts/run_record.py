@@ -27,7 +27,7 @@ To reproduce a run: check out its git commit (run_info.json), then
 Fitted model files (results/saved_models/) are not copied -- they're
 large and can be rebuilt from the config.
 
-Every row a run writes to results/results.json is also tagged with its
+Every row a run writes to results/latest/results.json is also tagged with its
 run_id (via the PIPELINE_RUN_ID environment variable that run_pipeline.py
 sets), so any score in results.json points back to its run folder.
 """
@@ -51,7 +51,7 @@ import yaml
 from scripts import paths
 
 RUN_ID_ENV = "PIPELINE_RUN_ID"
-RUNS_DIR = paths.RESULTS_DIR / "runs"
+RUNS_DIR = paths.RUNS_DIR
 INDEX_PATH = RUNS_DIR / "index.csv"
 
 PACKAGES = ["pandas", "numpy", "scikit-learn", "xgboost", "torch", "scipy", "holidays",
@@ -189,7 +189,7 @@ def save_run(
     (run_dir / "scores.json").write_text(json.dumps(rows, indent=2, default=str))
 
     # every results/ file created or updated during the run
-    skip = {RUNS_DIR, paths.SAVED_MODELS_DIR}
+    skip = {RUNS_DIR, paths.SAVED_MODELS_DIR, paths.RESULTS_DIR / "saved_models"}
     copied = 0
     start_ts = started.timestamp()
     for path in paths.RESULTS_DIR.rglob("*"):

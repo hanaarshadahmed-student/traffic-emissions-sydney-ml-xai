@@ -45,15 +45,15 @@ SHAP shares the credit between them.
 Scored on validation (the split for decisions); test is shown for reference.
 Models use their config.yaml settings. Nothing here touches results.json.
 
-Outputs (results/ablation/):
+Outputs (results/experiments/ablation/):
   ablation_<grain>.csv   every feature set x model x variant: features, val/test R2,
                          change in val R2 vs the full model
   ablation_<grain>.png   change in val R2 per variant
 
 Usage:
-    python src/12_ablation.py                          # both grains, ridge + xgboost
-    python src/12_ablation.py --grain daily --models xgboost random_forest
-    python src/12_ablation.py --feature-set exogenous
+    python experiments/03_ablation.py                          # both grains, ridge + xgboost
+    python experiments/03_ablation.py --grain daily --models xgboost random_forest
+    python experiments/03_ablation.py --feature-set exogenous
 Run AFTER the pipeline (needs data/processed/splits/).
 """
 
@@ -79,9 +79,9 @@ from scripts.experiment_utils import (  # noqa: E402
 )
 from scripts.feature_families import group_features, group_traffic_parts  # noqa: E402
 from scripts.model_utils import get_feature_columns, load_excluded_features, load_manifest  # noqa: E402
-from scripts.models import display_name  # noqa: E402
+from models.models import display_name  # noqa: E402
 
-OUT_DIR = paths.RESULTS_DIR / "ablation"
+OUT_DIR = paths.ABLATION_DIR
 MANIFEST_KEY = {"exogenous": "exogenous_features", "autoregressive": "autoregressive_features",
                 "all": "all_candidate_features"}
 

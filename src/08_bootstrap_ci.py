@@ -3,7 +3,7 @@ CO2/NO2 Traffic-Emissions Capstone -- Bootstrap confidence intervals
 
 How sure can we be about each model's test score, and are the top models
 really different or just tied? This script answers both from the row-by-row
-predictions the train/tune stages save in results/predictions/. Nothing is
+predictions the train/tune stages save in results/latest/predictions/. Nothing is
 retrained -- it only re-scores saved predictions.
 
 Method (block bootstrap):
@@ -26,17 +26,17 @@ otherwise the default one (--stage default / tuned forces one). Baselines
 (B1/B2) don't use features, so their predictions are shared across feature
 sets.
 
-Outputs (results/evaluation/):
+Outputs (results/latest/evaluation/):
   bootstrap_<grain>_<split>.csv           every model: score + 95% interval
   bootstrap_<grain>_<split>_vs_best.csv   each model vs the best one in its
                                           feature set (paired difference)
   bootstrap_<grain>_<split>.png           R2 with 95% intervals, per feature set
 
 Usage:
-    python src/09_bootstrap_ci.py                       # both grains, test split
-    python src/09_bootstrap_ci.py --grain hourly
-    python src/09_bootstrap_ci.py --split val --n-boot 2000
-Run AFTER the pipeline (it needs results/predictions/ and data/processed/splits/).
+    python src/08_bootstrap_ci.py                       # both grains, test split
+    python src/08_bootstrap_ci.py --grain hourly
+    python src/08_bootstrap_ci.py --split val --n-boot 2000
+Run AFTER the pipeline (it needs results/latest/predictions/ and data/processed/splits/).
 """
 
 from __future__ import annotations

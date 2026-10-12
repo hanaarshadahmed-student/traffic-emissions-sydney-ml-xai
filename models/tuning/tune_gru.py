@@ -25,7 +25,7 @@ from scripts.model_utils import (  # noqa: E402
     save_per_station,
     save_result,
 )
-from scripts.tuning.common import (  # noqa: E402
+from models.tuning.common import (  # noqa: E402
     ROOT_DIR,
     build_candidates,
     evaluate_generalization,
@@ -81,8 +81,8 @@ def save_training_history(model, grain: str, feature_set: str) -> dict:
 def run_experiment(grain, feature_set, config, candidates, frames, main_params):
     import torch
 
-    from scripts.gru import GRURegressor
-    from scripts.lstm import build_sequences
+    from models.sequence_models import GRURegressor
+    from models.sequence_models import build_sequences
 
     split = config["split"]
     selection_metric = config["selection_metric"]

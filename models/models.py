@@ -11,9 +11,9 @@ The project compares two kinds of method:
       4. xgboost         gradient-boosted trees
       5. svr             support vector regression (RBF kernel)
       6. lstm            recurrent neural network over a window of recent
-                         time steps (scripts/lstm.py, needs PyTorch)
+                         time steps (models/sequence_models.py, needs PyTorch)
       7. gru             gated recurrent unit network over hourly sequences
-                         (scripts/gru.py, needs PyTorch)
+                         (models/sequence_models.py, needs PyTorch)
 
   BASELINE METHODS (not ML -- defined in src/06_run_models.py, switched
   on/off under training.baselines in config/config.yaml):
@@ -32,7 +32,7 @@ To add a model:
   2. Add a matching block under training.models in config/config.yaml.
 Any scikit-learn-compatible estimator (.fit()/.predict()) works. A model
 that needs sequences of time steps instead of single rows (LSTM or GRU)
-sets `needs_sequences = True`; see scripts/lstm.py and scripts/gru.py.
+sets `needs_sequences = True`; see models/sequence_models.py.
 
 Notes on individual models:
   ridge -- also a diagnostic. If the trees score a negative R2 on the
@@ -56,12 +56,12 @@ from xgboost import XGBRegressor
 def _lstm(**params):
     # imported only when the LSTM is actually used, so the rest of the
     # pipeline still runs on a machine without PyTorch installed
-    from scripts.lstm import LSTMRegressor
+    from models.sequence_models import LSTMRegressor
     return LSTMRegressor(**params)
 
 
 def _gru(**params):
-    from scripts.gru import GRURegressor
+    from models.sequence_models import GRURegressor
     return GRURegressor(**params)
 
 

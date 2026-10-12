@@ -20,16 +20,16 @@ data and may be unlike all the others (that variation IS the finding).
 Models use their config.yaml settings (training.models.<name>.params) and the
 same sample weights as the main pipeline. Nothing here touches results.json.
 
-Outputs (results/loso/):
+Outputs (results/experiments/loso/):
   loso_<grain>_<feature_set>.csv           every station x model: rows, R2, RMSE, MAE
   loso_<grain>_<feature_set>_summary.csv   per model: mean / median / worst / best
                                            station R2, and R2 pooled over all stations
   loso_<grain>_<feature_set>.png           R2 per held-out station
 
 Usage:
-    python src/11_leave_one_station_out.py                     # daily+hourly, ridge+xgboost
-    python src/11_leave_one_station_out.py --grain daily --models ridge xgboost random_forest
-    python src/11_leave_one_station_out.py --feature-set all
+    python experiments/02_leave_one_station_out.py                     # daily+hourly, ridge+xgboost
+    python experiments/02_leave_one_station_out.py --grain daily --models ridge xgboost random_forest
+    python experiments/02_leave_one_station_out.py --feature-set all
 Run AFTER the pipeline (needs data/processed/splits/). Hourly with
 random_forest takes several minutes per station.
 """
@@ -55,10 +55,10 @@ from scripts.experiment_utils import (  # noqa: E402
     TARGET, TABULAR_MODELS, build, fit_score, load_config, read_split, weight_column,
 )
 from scripts.model_utils import evaluate, get_feature_columns  # noqa: E402
-from scripts.models import display_name  # noqa: E402
+from models.models import display_name  # noqa: E402
 from scripts.stations import add_station_name, station_label  # noqa: E402
 
-OUT_DIR = paths.RESULTS_DIR / "loso"
+OUT_DIR = paths.LOSO_DIR
 MIN_ROWS = 30  # a station with fewer rows can't be scored reliably
 
 

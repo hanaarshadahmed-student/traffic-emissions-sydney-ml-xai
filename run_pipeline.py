@@ -17,21 +17,26 @@ Stages (pipeline order):
     features    src/04_feature_engineering.py
     split       src/05_train_test_split.py
     train       src/06_run_models.py
-    tune        scripts/tuning/tune_*.py for every enabled ML model
-    evaluate    src/07_evaluation.py
-    explain     src/08_explainability.py   (SHAP on the tuned XGBoost)
-    analysis    src/09_bootstrap_ci.py          confidence intervals
-                src/10_error_analysis.py        errors by hour/day/station/NO2 level
-                src/11_leave_one_station_out.py unseen-station test
-                src/12_ablation.py              retrain with feature families removed
-                src/13_permutation_importance.py  second check of SHAP
-                src/14_holiday_check.py         public holidays: less traffic, same clock
-                src/15_top_models_permutation.py  do the top 3 models rely on the same drivers?
+    tune        models/tuning/tune_*.py for every enabled ML model
+    evaluate    src/07_evaluation.py              tables and charts
+                src/08_bootstrap_ci.py            95% confidence intervals
+    explain     src/09_shap_explainability.py     SHAP on the tuned XGBoost
+                src/10_permutation_importance.py  top 3 models: same drivers?
+  only with --experiments (or --stage experiments):
+    experiments experiments/01_error_analysis.py         errors by hour/station/traffic/NO2 level
+                experiments/02_leave_one_station_out.py  unseen-station test
+                experiments/03_ablation.py               retrain with feature families removed
+                experiments/04_holiday_check.py          public holidays: less traffic, same clock
 
 `--stage all` (the default) runs every stage and first empties
 data/processed/ so a run never mixes with a stale one. results/ is never
-wiped -- results.json is the cross-run log that train/tune upsert into.
-Any other stage runs just that stage and reuses what's already on disk.
+wiped -- results/latest/results.json is the cross-run log that train/tune
+upsert into. Any other stage runs just that stage and reuses what's on disk.
+
+Sensitivity runs (`--sensitivity <name>`, defined in config/sensitivity.yaml)
+apply a few config changes and write to their OWN folders --
+data/processed_sensitivity/<name>/ and results/sensitivity/<name>/ -- so they
+never overwrite the main data or results. Tuning is off for them.
 
 Every run that trains, tunes or evaluates is saved to results/runs/<run_id>/
 with the exact (effective) config, data fingerprint, git commit and full
@@ -40,7 +45,9 @@ log (see scripts/run_record.py), and listed in results/runs/index.csv.
 Usage:
     python run_pipeline.py                          # everything
     python run_pipeline.py --no-tune                # everything except tuning
-    python run_pipeline.py --no-analysis            # skip the extra analysis stage
+    python run_pipeline.py --experiments            # everything + the experiments
+    python run_pipeline.py --stage experiments      # only the experiments
+    python run_pipeline.py --sensitivity no2_clipped  # a sensitivity run (own folders)
     python run_pipeline.py --jobs 1                 # train one model at a time
     python run_pipeline.py --grain daily            # only daily data
     python run_pipeline.py --models ridge lstm      # only these ML models
@@ -56,6 +63,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import importlib
 import os
 import shutil
 import signal
@@ -77,7 +85,7 @@ from scripts import paths  # noqa: E402
 from scripts import run_record  # noqa: E402
 
 # stages whose outputs are worth keeping as a run record
-RECORDED_STAGES = {"train", "tune", "evaluate", "analysis"}
+RECORDED_STAGES = {"train", "tune", "evaluate", "explain", "experiments"}
 
 # (stage name, scripts (relative to the repo root), label, required inputs relative
 # to the repo root -- {grain} is filled in from training.grain,
@@ -105,25 +113,27 @@ STAGES = [
         "data/processed/splits/{grain}_train.csv",
         "data/processed/splits/{grain}_val.csv",
     ], True),
-    ("tune", ["scripts/tuning/tune_ridge.py", "scripts/tuning/tune_decision_tree.py", "scripts/tuning/tune_random_forest.py", "scripts/tuning/tune_lstm.py", "scripts/tuning/tune_gru.py", "scripts/tuning/tune_xgboost.py", "scripts/tuning/tune_svr.py"], "Hyperparameter tuning", [
+    ("tune", ["models/tuning/tune_ridge.py", "models/tuning/tune_decision_tree.py", "models/tuning/tune_random_forest.py", "models/tuning/tune_lstm.py", "models/tuning/tune_gru.py", "models/tuning/tune_xgboost.py", "models/tuning/tune_svr.py"], "Hyperparameter tuning", [
         "data/processed/splits/{grain}_train.csv",
         "data/processed/splits/{grain}_val.csv",
     ], False),
-    ("evaluate", ["src/07_evaluation.py"], "Evaluation tables + plots", [
-        "results/results.json",
+    ("evaluate", ["src/07_evaluation.py", "src/08_bootstrap_ci.py"],
+     "Evaluation tables + confidence intervals", [
+        "results/latest/results.json",
+        "results/latest/predictions",
     ], False),
-    ("explain", ["src/08_explainability.py"], "Explainability (SHAP)", [
+    ("explain", ["src/09_shap_explainability.py", "src/10_permutation_importance.py"],
+     "Explainability (SHAP + permutation)", [
         "data/processed/splits/{grain}_train.csv",
         "data/processed/splits/{grain}_test.csv",
         "data/processed/feature_manifest.json",
+        "results/latest/evaluation/all_results.csv",
     ], True),
-    ("analysis", ["src/09_bootstrap_ci.py", "src/10_error_analysis.py",
-                  "src/11_leave_one_station_out.py", "src/12_ablation.py",
-                  "src/13_permutation_importance.py", "src/14_holiday_check.py",
-                  "src/15_top_models_permutation.py"],
-     "Extra analysis (CIs, errors, LOSO, ablation, permutation, holidays, top-3 models)", [
+    ("experiments", ["experiments/01_error_analysis.py", "experiments/02_leave_one_station_out.py",
+                     "experiments/03_ablation.py", "experiments/04_holiday_check.py"],
+     "Experiments (errors, unseen stations, ablation, holidays)", [
         "data/processed/splits/{grain}_test.csv",
-        "results/predictions",
+        "results/latest/predictions",
     ], True),
 ]
 STAGE_NAMES = [s[0] for s in STAGES]
@@ -163,9 +173,39 @@ def wipe_processed_dir() -> None:
         say("[wipe] data/processed/ already empty")
 
 
+def resolve(rel: str) -> Path:
+    """'data/processed/x' / 'results/latest/x' -> the real folder (different
+    for a sensitivity run, see scripts/paths.py)."""
+    for prefix, folder in (("data/processed/", paths.PROCESSED_DIR), ("results/latest/", paths.LATEST_DIR)):
+        if rel.startswith(prefix):
+            return folder / rel[len(prefix):]
+    return ROOT_DIR / rel
+
+
 def check_inputs(required: list[str], grains: list[str]) -> list[str]:
     needed = dict.fromkeys(rel.format(grain=g) for rel in required for g in grains)
-    return [rel for rel in needed if not (ROOT_DIR / rel).exists()]
+    return [rel for rel in needed if not resolve(rel).exists()]
+
+
+def deep_merge(base: dict, changes: dict) -> dict:
+    out = copy.deepcopy(base)
+    for key, value in (changes or {}).items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = deep_merge(out[key], value)
+        else:
+            out[key] = copy.deepcopy(value)
+    return out
+
+
+def apply_sensitivity(config: dict, name: str) -> tuple[dict, str]:
+    """config.yaml + the changes listed for `name` in config/sensitivity.yaml."""
+    runs = load_config(paths.SENSITIVITY_CONFIG_PATH)
+    if name not in runs:
+        raise SystemExit(f"--sensitivity: {name!r} isn't in {paths.SENSITIVITY_CONFIG_PATH.name}. "
+                         f"Known: {sorted(runs)}")
+    config = deep_merge(config, runs[name].get("changes") or {})
+    config.setdefault("pipeline", {})["run_tuning"] = False
+    return config, runs[name].get("description", "")
 
 
 def apply_overrides(config: dict, args) -> tuple[dict, list[str]]:
@@ -188,9 +228,9 @@ def apply_overrides(config: dict, args) -> tuple[dict, list[str]]:
     if args.no_tune:
         pipeline["run_tuning"] = False
         notes.append("--no-tune")
-    if args.no_analysis:
-        pipeline["run_analysis"] = False
-        notes.append("--no-analysis")
+    if args.experiments:
+        pipeline["run_experiments"] = True
+        notes.append("--experiments")
     if args.jobs is not None:
         pipeline["jobs"] = args.jobs
         notes.append(f"--jobs {args.jobs}")
@@ -299,9 +339,12 @@ def main() -> None:
                         help="Only these ML models, e.g. --models ridge lstm (baselines always run).")
     parser.add_argument("--no-tune", action="store_true",
                         help="Skip the (slow) tune stage when running all stages.")
-    parser.add_argument("--no-analysis", action="store_true",
-                        help="Skip the extra analysis stage (bootstrap, errors, LOSO, ablation, "
-                             "permutation) when running all stages.")
+    parser.add_argument("--experiments", action="store_true",
+                        help="Also run the experiments (error analysis, leave-one-station-out, "
+                             "ablation, holiday check) after the main pipeline.")
+    parser.add_argument("--sensitivity", metavar="NAME",
+                        help="Sensitivity run from config/sensitivity.yaml, e.g. no2_clipped. "
+                             "Uses its own data/results folders; tuning off.")
     parser.add_argument("--jobs", type=int, default=None,
                         help="How many models to train at the same time (default: pipeline.jobs in the "
                              "config, normally auto = one per 4 CPU cores, max 4). --jobs 1 = one at a time.")
@@ -311,15 +354,25 @@ def main() -> None:
     args = parser.parse_args()
     started = datetime.now()
 
-    config, overrides = apply_overrides(load_config(args.config), args)
+    base_config = load_config(args.config)
+    if args.sensitivity:
+        # every stage script (and this runner) picks the sensitivity folders up
+        # from this environment variable -- see scripts/paths.py
+        os.environ[paths.SENSITIVITY_ENV] = args.sensitivity
+        importlib.reload(paths)
+        base_config, description = apply_sensitivity(base_config, args.sensitivity)
+        args.name = args.name or f"sens_{args.sensitivity}"
+    config, overrides = apply_overrides(base_config, args)
+    if args.sensitivity:
+        overrides.insert(0, f"--sensitivity {args.sensitivity}")
     stage = resolve_stage(config, args.stage)
     grains = config["training"]["grain"]
     run_tuning = bool(config["pipeline"].get("run_tuning", True))
-    run_analysis = bool(config["pipeline"].get("run_analysis", True))
+    run_experiments = bool(config["pipeline"].get("run_experiments", False))
 
     if stage == "all":
         run_list = [s for s in STAGES
-                    if (s[0] != "tune" or run_tuning) and (s[0] != "analysis" or run_analysis)]
+                    if (s[0] != "tune" or run_tuning) and (s[0] != "experiments" or run_experiments)]
     else:
         run_list = [s for s in STAGES if s[0] == stage]
     save = (bool(config["pipeline"].get("save_run", True)) and not args.no_save
@@ -335,23 +388,32 @@ def main() -> None:
 
     if stage == "all":
         say(f"Running the FULL pipeline: grains {grains}, "
-            f"tuning {'ON' if run_tuning else 'OFF'}, analysis {'ON' if run_analysis else 'OFF'}"
+            f"tuning {'ON' if run_tuning else 'OFF'}, experiments {'ON' if run_experiments else 'OFF'}"
             + (f", overrides: {' '.join(overrides)}" if overrides else ""))
         wipe_processed_dir()
     else:
         say(f"Running SINGLE stage: {stage!r}, grains {grains}"
             + (f", overrides: {' '.join(overrides)}" if overrides else ""))
+    if args.sensitivity:
+        say(f"SENSITIVITY run {args.sensitivity!r}: {description}\n"
+            f"  data    -> {paths.PROCESSED_DIR.relative_to(ROOT_DIR)}\n"
+            f"  results -> {paths.LATEST_DIR.relative_to(ROOT_DIR)}  (main results untouched)")
     say(f"Training {resolve_jobs(config)} model(s) at a time (pipeline.jobs / --jobs)")
     if save:
         say(f"Run id: {run_id}")
 
+    config_arg = ["--config", str(effective_path)]
     stage_args = {
-        "clean": ["--config", str(effective_path)],
-        "train": ["--config", str(effective_path), "--jobs", str(resolve_jobs(config))],
+        "clean": config_arg,
+        "train": [*config_arg, "--jobs", str(resolve_jobs(config))],
         "tune": ["--main-config", str(effective_path)],
-        "explain": ["--config", str(effective_path)],
-        "analysis": ["--config", str(effective_path), "--grain", *grains],
-        "evaluate": ["--grain", grains[0]] if len(grains) == 1 else [],
+        "explain": config_arg,
+        "experiments": [*config_arg, "--grain", *grains],
+    }
+    script_args = {  # scripts that need different arguments from the rest of their stage
+        "src/07_evaluation.py": ["--grain", grains[0]] if len(grains) == 1 else [],
+        "src/08_bootstrap_ci.py": ["--grain", *grains],
+        "src/10_permutation_importance.py": [*config_arg, "--grain", *grains],
     }
 
     timings: list[tuple[str, str, float]] = []
@@ -370,7 +432,8 @@ def main() -> None:
                         effective_path.unlink(missing_ok=True)
                     raise SystemExit(f"[{name}] can't run -- missing {missing}.{hint}")
             try:
-                elapsed = sum(run_script(name, script, label, stage_args.get(name, []), env)
+                elapsed = sum(run_script(name, script, label,
+                                         script_args.get(script, stage_args.get(name, [])), env)
                               for script in scripts)
             except StageFailed as failure:
                 timings.append((name, label, 0.0))

@@ -1,24 +1,31 @@
 """
-CO2/NO2 Traffic-Emissions Capstone -- Do the top 3 models rely on the same drivers?
+CO2/NO2 Traffic-Emissions Capstone -- Permutation importance (explain stage, part 2)
 
-SHAP (stage 08) explains XGBoost in detail, but XGBoost is not the most
-accurate model everywhere: on hourly data the GRU and LSTM score higher. This
-script takes the THREE most accurate ML models for each grain and feature set
-(by test R2, from the bootstrap table made by 09_bootstrap_ci.py) and runs the
-same model-agnostic test on each: permutation importance.
+Two questions, one test:
+  1. Does a second, independent method agree with SHAP? (XGBoost)
+  2. Do the most accurate models rely on the same drivers? SHAP (09) explains
+     XGBoost, but on hourly data the GRU and LSTM score higher.
+
+So for each grain and feature set this script takes the THREE most accurate
+ML models by test R2 (from 07_evaluation.py's all_results.csv), plus XGBoost
+if it isn't among them, and runs permutation importance on each.
 
 Permutation importance: shuffle one feature family (all weather features,
 all traffic features, ...) across the test rows, so its values no longer
 match their rows, and re-score. The drop in R2 is how much the model depends
-on that family. It needs only the model's predictions, so it works the same
-way for XGBoost, SVR, LSTM and GRU. For LSTM / GRU the shuffle is applied to
-every hour (or day) of the model's input window at once.
+on that family. Families are shuffled as a WHOLE: shuffling one traffic
+feature looks harmless while 40 others still carry the same information.
+It needs only the model's predictions, so it works the same way for
+XGBoost, SVR, LSTM and GRU; for LSTM / GRU the shuffle is applied to every
+hour (or day) of the input window at once. Each shuffle is repeated
+--repeats times; the spread is the error bar.
 
-Outputs (results/permutation/):
-  top3_families_<grain>_<feature_set>.csv   R2 drop per family for each top model,
+Outputs (results/latest/permutation/):
+  top3_families_<grain>_<feature_set>.csv   R2 drop per family for each model,
                                             each model's rank, and XGBoost's SHAP share
   top3_agreement_<grain>_<feature_set>.csv  Spearman rank agreement between every pair
-                                            of models (and with XGBoost's SHAP ranking)
+                                            of models, and with XGBoost's SHAP ranking
+                                            ("XGBoost vs XGBoost SHAP" = question 1)
   top3_traffic_parts_<grain>_<feature_set>.csv   the same for the parts of traffic
   top3_<grain>_<feature_set>.png            family importance, models side by side
   top3_window_<grain>_<feature_set>_<model>.csv/.png   LSTM / GRU only: which
@@ -30,10 +37,10 @@ A tree / linear / SVR model without a matching saved file is refitted with
 its default settings (and labelled so); an LSTM / GRU without one is skipped.
 
 Usage:
-    python src/15_top_models_permutation.py
-    python src/15_top_models_permutation.py --grain hourly --feature-set exogenous --top 3
-    python src/15_top_models_permutation.py --grain hourly --models gru xgboost
-Run AFTER 09_bootstrap_ci.py (top models) and 08 / 13 (SHAP, for the comparison).
+    python src/10_permutation_importance.py
+    python src/10_permutation_importance.py --grain hourly --feature-set exogenous --top 3
+    python src/10_permutation_importance.py --grain hourly --models gru xgboost
+Run AFTER 07_evaluation.py (model ranking) and 09_shap_explainability.py (SHAP shares).
 """
 
 from __future__ import annotations
@@ -59,22 +66,29 @@ from scripts.experiment_utils import (  # noqa: E402
 )
 from scripts.feature_families import group_features, group_traffic_parts  # noqa: E402
 from scripts.model_utils import fit_with_optional_weight, get_feature_columns  # noqa: E402
-from scripts.models import display_name  # noqa: E402
+from models.models import display_name  # noqa: E402
 
-OUT_DIR = paths.RESULTS_DIR / "permutation"
+OUT_DIR = paths.PERMUTATION_DIR
 SEQUENCE_MODELS = ["lstm", "gru"]
 BASELINES = ["naive_persistence", "naive_seasonal_climatology"]
 UNIT = {"daily": "days", "hourly": "hours"}
 
 
 def top_models(grain: str, feature_set: str, n: int) -> list[str]:
-    """The n ML models with the highest test R2 (bootstrap table from stage 09)."""
-    path = paths.EVALUATION_DIR / f"bootstrap_{grain}_test.csv"
+    """The n ML models with the highest test R2 (tuned version where there is
+    one), plus XGBoost -- the model SHAP explains -- if it isn't among them."""
+    path = paths.EVALUATION_DIR / "all_results.csv"
     if not path.exists():
         return []
     table = pd.read_csv(path)
-    table = table[(table["feature_set"] == feature_set) & ~table["model"].isin(BASELINES)]
-    return table.sort_values("r2", ascending=False)["model"].head(n).tolist()
+    table = table[(table["grain"] == grain) & (table["feature_set"] == feature_set)
+                  & (table["split"] == "test") & ~table["model"].isin(BASELINES)]
+    table = (table.assign(_tuned=table["stage"].eq("tuned"))
+             .sort_values(["_tuned", "r2"], ascending=False).drop_duplicates("model"))
+    top = table.sort_values("r2", ascending=False)["model"].head(n).tolist()
+    if "xgboost" in set(table["model"]) and "xgboost" not in top:
+        top.append("xgboost")
+    return top
 
 
 # --- each model wrapped so it can be scored after shuffling ----------------------
@@ -113,21 +127,18 @@ class SequenceScorer:
     def __init__(self, name, grain, feature_set, frames, rows):
         import torch
 
-        from scripts.lstm import build_sequences
-        if name == "gru":
-            from scripts.gru import _Network
-        else:
-            from scripts.lstm import _Network
+        from models.sequence_models import build_sequences
+        from models.sequence_models import GRUNetwork, LSTMNetwork
+        network_class = GRUNetwork if name == "gru" else LSTMNetwork
 
         path = paths.SAVED_MODELS_DIR / f"{name}_{grain}_{feature_set}.pt"
         if not path.exists():
             raise FileNotFoundError(f"{path.name} not found -- run the tune stage")
         saved = torch.load(path, map_location="cpu", weights_only=False)
-        if not isinstance(saved, dict) or "model_params" not in saved:
-            raise FileNotFoundError(f"{path.name} was saved without its settings "
-                                    f"(older version of tune_{name}.py) -- rerun the tune stage")
+        if "model_params" not in saved:
+            saved = _rebuild_old_save(saved, name, grain, feature_set, frames)
         p = saved["model_params"]
-        self.network = _Network(p["n_inputs"], p["hidden_size"], p["num_layers"], p["dropout"])
+        self.network = network_class(p["n_inputs"], p["hidden_size"], p["num_layers"], p["dropout"])
         self.network.load_state_dict(saved["state_dict"])
         self.network.eval()
         self.seq_len, self.mean, self.std = int(p["seq_len"]), saved["target_mean"], saved["target_std"]
@@ -152,7 +163,7 @@ class SequenceScorer:
         return np.concatenate(out) * self.std + self.mean
 
     def score(self, y, columns=None, rng=None) -> float:
-        from scripts.lstm import _gather
+        from models.sequence_models import _gather
         if not columns:
             return r2(y, self._predict(_gather(self.data, self.rows)))
         idx = [self.features.index(c) for c in columns]
@@ -167,7 +178,7 @@ class SequenceScorer:
         """R2 drop when ONE position of the input window is shuffled across rows."""
         import torch
 
-        from scripts.lstm import _gather
+        from models.sequence_models import _gather
         x = _gather(self.data, self.rows)
         out = []
         for pos in range(self.seq_len):
@@ -179,6 +190,39 @@ class SequenceScorer:
             out.append({"steps_back": self.seq_len - 1 - pos,
                         "r2_drop": float(np.mean(drops)), "r2_drop_sd": float(np.std(drops))})
         return pd.DataFrame(out).sort_values("steps_back")
+
+
+def _rebuild_old_save(state_dict, name, grain, feature_set, frames) -> dict:
+    """Older tune_lstm.py saved only the network weights. Everything else can
+    be recovered without retraining: layer sizes from the weight shapes, the
+    window length from the tuning summary, the target scaling from the train
+    split (the model used its mean / std), the features from the manifest."""
+    prefix = "lstm" if name == "lstm" else "gru"
+    w_ih = state_dict[f"{prefix}.weight_ih_l0"]
+    features = get_feature_columns(grain, feature_set)
+    if w_ih.shape[1] != len(features) + 1:
+        raise FileNotFoundError(f"saved {name} has {w_ih.shape[1] - 1} inputs but the current data has "
+                                f"{len(features)} features -- rerun the tune stage")
+    summary = paths.TUNING_DIR / f"{name}_tuned_metrics.csv"
+    if not summary.exists():
+        raise FileNotFoundError(f"{summary.name} not found -- can't tell the window length")
+    row = pd.read_csv(summary).query("grain == @grain and feature_set == @feature_set")
+    if row.empty or "best_seq_len" not in row:
+        raise FileNotFoundError(f"no {grain}/{feature_set} row in {summary.name}")
+    y_train = frames["train"][TARGET].to_numpy(float)
+    return {
+        "state_dict": state_dict,
+        "model_params": {
+            "n_inputs": int(w_ih.shape[1]),
+            "hidden_size": int(state_dict[f"{prefix}.weight_hh_l0"].shape[1]),
+            "num_layers": sum(1 for k in state_dict if k.startswith(f"{prefix}.weight_ih_l")),
+            "dropout": 0.0,  # only matters in training
+            "seq_len": int(row["best_seq_len"].iloc[0]),
+        },
+        "target_mean": float(np.mean(y_train)),
+        "target_std": float(np.std(y_train)) or 1.0,
+        "features": features,
+    }
 
 
 # --- the experiment -------------------------------------------------------------
@@ -197,7 +241,7 @@ def drops_for(scorer, groups: dict[str, list[str]], y, base, repeats, rng) -> di
 def run(grain: str, feature_set: str, args, config: dict) -> None:
     models = args.models or top_models(grain, feature_set, args.top)
     if not models:
-        print(f"[{grain}/{feature_set}] no bootstrap_{grain}_test.csv -- run 09_bootstrap_ci.py first. Skipped.")
+        print(f"[{grain}/{feature_set}] no test scores in evaluation/all_results.csv -- run the evaluate stage first. Skipped.")
         return
     frames = {s: read_split(grain, s) for s in ("train", "val", "test")}
     test = frames["test"]
@@ -207,7 +251,7 @@ def run(grain: str, feature_set: str, args, config: dict) -> None:
     features = get_feature_columns(grain, feature_set)
     families_of = group_features(features)
     parts_of = group_traffic_parts(features)
-    print(f"\n{grain} | {feature_set}: top {len(models)} models by test R2: "
+    print(f"\n{grain} | {feature_set}: models by test R2: "
           + ", ".join(display_name(m) for m in models) + f"  ({len(rows):,} test rows, "
           f"{args.repeats} shuffles each)", flush=True)
 
@@ -258,7 +302,7 @@ def run(grain: str, feature_set: str, args, config: dict) -> None:
 
 
 def load_shap_shares(grain: str, feature_set: str) -> pd.DataFrame | None:
-    path = paths.RESULTS_DIR / "shap" / f"groups_{grain}_{feature_set}.csv"
+    path = paths.SHAP_DIR / f"groups_{grain}_{feature_set}.csv"
     if not path.exists():
         return None
     return pd.read_csv(path)[["family", "share_of_total"]].rename(
