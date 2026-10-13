@@ -23,8 +23,10 @@ How to read the outputs:
   direction   correlation between a feature's value and its SHAP value:
               positive = higher values raise NO2, negative = lower it.
               (Rough guide only -- see the dependence plots for the shape.)
-  Features are scaled (05_train_test_split.py), so colours/axes in the plots
-  show scaled values; compare high vs low, not absolute numbers.
+  The model sees scaled features (05_train_test_split.py), but the plots
+  undo the scaling, so axes and colours show real units (m/s, %, vehicles).
+  Dummies for stations with no rows in the explained split (train-only
+  stations) are left out of the ranking and plots -- see explain().
 
 Outputs (results/latest/shap/):
   importance_<grain>_<feature_set>.csv      every feature: importance, share, direction
@@ -111,6 +113,38 @@ def get_model(grain: str, feature_set: str, main_config: dict, features: list[st
     return model, f"default XGBoost refitted on train ({reason})"
 
 
+def absent_station_dummies(X: pd.DataFrame) -> list[str]:
+    """stn_<id> columns that are 0 on every explained row = stations with no
+    rows in this split (one-hot dummies aren't scaled, so 0 means 'not this
+    station')."""
+    return [c for c in X.columns if c.startswith("stn_") and not X[c].astype(float).ne(0).any()]
+
+
+# units for the x-axis of dependence plots (real values, after _real_values)
+_UNITS = (("_ms", "m/s"), ("wind_speed", "m/s"), ("temp_c", "°C"), ("humidity_pct", "%"),
+          ("rain_mm", "mm"), ("no2_pphm", TARGET_UNIT), ("_km", "km"), ("_kmh", "km/h"),
+          ("dispersion_proxy", "log vehicles per (1 + wind m/s)"), ("traffic_volume", "vehicles"),
+          ("traffic_total_x", "vehicles"), ("traffic_heavy_x", "vehicles"))
+
+
+def feature_label(feature: str) -> str:
+    for key, unit in _UNITS:
+        if key in feature:
+            return f"{feature} ({unit})"
+    return feature
+
+
+def has_real_wind(grain: str, split: str, index: pd.Index) -> pd.Series:
+    """True for rows with a real wind reading. Stations with no wind sensor
+    (MUB001) carry a placeholder wind of 0, which would put every one of their
+    rows in the 'low wind' group -- so wind-based charts leave them out."""
+    path = paths.SPLITS_DIR / f"{grain}_{split}.csv"
+    flag = pd.read_csv(path, usecols=lambda c: c == "has_wind_data")
+    if "has_wind_data" not in flag:
+        return pd.Series(True, index=index)
+    return flag["has_wind_data"].eq(1).reindex(index).fillna(True)
+
+
 def importance_table(shap_values: np.ndarray, X: pd.DataFrame) -> pd.DataFrame:
     rows = []
     mean_abs = np.abs(shap_values).mean(axis=0)
@@ -157,21 +191,41 @@ def explain(grain: str, feature_set: str, args, main_config: dict) -> pd.DataFra
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     table = importance_table(shap_values, X)
-    table.to_csv(OUT_DIR / f"importance_{tag}.csv", index=False)
+    # family totals use EVERY feature, so the shares still add up to 100%
     groups = (table.groupby("family")[[f"mean_abs_shap_{TARGET_UNIT}", "share_of_total"]]
               .sum().sort_values("share_of_total", ascending=False).reset_index())
     groups.to_csv(OUT_DIR / f"groups_{tag}.csv", index=False)
     pd.DataFrame(shap_values, columns=X.columns, index=X.index).to_csv(
         OUT_DIR / f"shap_values_{tag}.csv.gz", index_label="row")
 
-    top = min(args.top, X.shape[1])
-    shap.summary_plot(shap_values, X, max_display=top, show=False)
+    # Station dummies for stations with NO rows here (e.g. stn_10011 when
+    # explaining test rows -- that station is train-only) can still get SHAP
+    # value: the model is using "this is NOT Edgecliff". That's not something
+    # to interpret, so they're left out of the ranking and the plots (their
+    # small share stays in the Road / station family total above).
+    absent = absent_station_dummies(X)
+    if absent:
+        print(f"  left out of the ranking: {len(absent)} dummies for stations with no "
+              f"{args.split} rows ({', '.join(absent)}; "
+              f"{table.loc[table['feature'].isin(absent), 'share_of_total'].sum():.1%} of total importance)")
+    table = table[~table["feature"].isin(absent)].copy()
+    table["rank"] = range(1, len(table) + 1)
+    table.to_csv(OUT_DIR / f"importance_{tag}.csv", index=False)
+
+    # plots show REAL units (m/s, %, vehicles, ...), not the scaled values the
+    # model sees; the SHAP values themselves are unchanged
+    raw = _real_values(grain, X)
+    keep = [i for i, f in enumerate(X.columns) if f not in absent]
+    shown_values, shown_raw = shap_values[:, keep], raw.iloc[:, keep]
+
+    top = min(args.top, shown_raw.shape[1])
+    shap.summary_plot(shown_values, shown_raw, max_display=top, show=False)
     plt.title(f"SHAP summary -- {grain}, {feature_set} features ({args.split} rows)")
     plt.tight_layout()
     plt.savefig(OUT_DIR / f"summary_{tag}.png", dpi=150)
     plt.close("all")
 
-    shap.summary_plot(shap_values, X, plot_type="bar", max_display=top, show=False)
+    shap.summary_plot(shown_values, shown_raw, plot_type="bar", max_display=top, show=False)
     plt.xlabel(f"mean |SHAP value| ({TARGET_UNIT})")
     plt.title(f"Feature importance -- {grain}, {feature_set} features")
     plt.tight_layout()
@@ -179,13 +233,15 @@ def explain(grain: str, feature_set: str, args, main_config: dict) -> pd.DataFra
     plt.close("all")
 
     for feature in table["feature"].head(args.dependence):
-        shap.dependence_plot(feature, shap_values, X, interaction_index=None, show=False)
+        shap.dependence_plot(feature, shap_values, raw, interaction_index=None, show=False)
+        plt.xlabel(feature_label(feature))
+        plt.ylabel(f"SHAP value for {feature} ({TARGET_UNIT})")
         plt.title(f"Effect of {feature} -- {grain}, {feature_set}")
         plt.tight_layout()
         plt.savefig(OUT_DIR / f"dependence_{tag}_{feature}.png", dpi=150)
         plt.close("all")
 
-    traffic_wind_interaction(shap_values, X, grain, feature_set, args.split)
+    traffic_wind_interaction(shap_values, raw, grain, feature_set, args.split)
     traffic_parts(table, grain, feature_set)
     if args.waterfalls:
         single_predictions(explainer, shap_values, model, X, grain, feature_set, args.split)
@@ -249,12 +305,13 @@ def _real_values(grain: str, X: pd.DataFrame) -> pd.DataFrame:
     return raw
 
 
-def _pick_cases(meta: pd.DataFrame, raw: pd.DataFrame, grain: str) -> dict[str, int]:
-    """Rows worth explaining one by one (index labels of X)."""
+def _pick_cases(meta: pd.DataFrame, raw: pd.DataFrame, grain: str, real_wind: pd.Series) -> dict[str, int]:
+    """Rows worth explaining one by one (index labels of X). Calm/windy cases
+    only come from rows with a real wind reading."""
     y = meta["no2_pphm"]
     cases = {"highest_NO2": y.idxmax(),
              "typical": (y - y.median()).abs().idxmin()}
-    wind = raw["wind_speed_ms"] if "wind_speed_ms" in raw else None
+    wind = raw["wind_speed_ms"].where(real_wind) if "wind_speed_ms" in raw else None
     if wind is not None:
         if grain == "hourly":
             when = pd.to_datetime(meta["timestamp"])
@@ -287,7 +344,7 @@ def single_predictions(explainer, shap_values: np.ndarray, model, X: pd.DataFram
     base = float(np.ravel(explainer.expected_value)[0])
     tag = f"{grain}_{feature_set}"
     rows = []
-    for case, label in _pick_cases(meta, raw, grain).items():
+    for case, label in _pick_cases(meta, raw, grain, has_real_wind(grain, split, X.index)).items():
         i = position[label]
         prediction = float(model.predict(X.iloc[[i]])[0])
         explanation = shap.Explanation(values=shap_values[i], base_values=base,
@@ -378,11 +435,16 @@ def traffic_wind_interaction(shap_values: np.ndarray, X: pd.DataFrame, grain: st
     equal-sized bins (deciles, 1 = quietest); one line per wind-speed third.
     If wind disperses traffic NO2, the low-wind line should climb more
     steeply than the high-wind line. Features are scaled, so bins are used
-    rather than raw vehicle counts."""
+    rather than raw vehicle counts. Rows without a real wind reading
+    (stations with no wind sensor) are left out -- see has_real_wind()."""
     tag = f"{grain}_{feature_set}"
     if not {"traffic_volume_total", "wind_speed_ms"} <= set(X.columns):
         print(f"  [traffic x wind] skipped for {tag}: needs traffic_volume_total and wind_speed_ms")
         return
+    real_wind = has_real_wind(grain, split, X.index).to_numpy()
+    if not real_wind.all():
+        print(f"  [traffic x wind] {tag}: left out {(~real_wind).sum():,} rows with no wind sensor")
+    X, shap_values = X[real_wind], shap_values[real_wind]
     traffic_cols = [i for i, f in enumerate(X.columns) if family_of(f) in TRAFFIC_FAMILIES]
     frame = pd.DataFrame({
         "traffic_effect": shap_values[:, traffic_cols].sum(axis=1),

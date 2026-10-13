@@ -77,6 +77,23 @@ def log(msg):
     print(msg)
 
 
+def log_thin_hours(df):
+    """Hour ending 02:00 (1-2 am) has NO2 on only ~20% of days at EVERY
+    monitor: almost none in 2024, ~40% in 2025. It's a gap in the AQ
+    network's data at that hour (most likely the routine overnight
+    instrument check), not bad readings -- the values that do exist sit
+    between 1 am and 3 am as expected. They are kept; this just logs how
+    thin the hour is, so a by-hour chart that looks odd at 2 am can be
+    explained (see data/Data.md)."""
+    coverage = df.groupby("hour_ending")["no2_pphm"].apply(lambda s: s.notna().mean())
+    thin = coverage[coverage < 0.6 * coverage.median()]
+    if len(thin):
+        log("Step 4 -- NOTE: NO2 is missing far more often at hour ending "
+            + ", ".join(f"{h:02d}:00 ({c:.0%} of rows have NO2 vs {coverage.median():.0%} typical)"
+                        for h, c in thin.items())
+            + " -- a network-wide gap at that hour; values kept, few rows there")
+
+
 def preprocess(df, label, min_days_col_scale=1, exclusions=None, clip_negative_no2=False):
     """Shared cleaning logic. min_days_col_scale=24 for hourly data, since
     'days of coverage' there means station-hours / 24."""
@@ -138,6 +155,8 @@ def preprocess(df, label, min_days_col_scale=1, exclusions=None, clip_negative_n
     )
     df_clean = df.dropna(subset=["no2_pphm"]).copy()
     log(f"Step 4 -- dropped {before - len(df_clean)} rows with missing NO2 target: {len(df_clean)} rows remain")
+    if "hour_ending" in df.columns:
+        log_thin_hours(df)
     if len(missing_no2_by_station):
         log("           breakdown by station:")
         for sid, n in missing_no2_by_station.items():

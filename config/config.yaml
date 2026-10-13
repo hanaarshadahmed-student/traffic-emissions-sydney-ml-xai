@@ -139,7 +139,8 @@ training:
         n_jobs: -1
         random_state: 42
 
-    # 5. SVR -- daily only: kernel SVR is far too slow on ~47k hourly rows
+    # 5. SVR -- daily only: kernel SVR scales with rows squared, far too slow
+    #    on ~105k hourly training rows (stated as a limitation in the report)
     svr:
       enabled: true
       grains: [daily]
@@ -167,12 +168,11 @@ training:
         patience: 5          # stop after this many epochs without val improvement
         random_state: 42
 
-    # 7. GRU -- lighter recurrent alternative to LSTM for hourly sequences
+    # 7. GRU -- lighter recurrent alternative to LSTM (both grains)
     gru:
       enabled: true
-      grains: [hourly]
       params:
-        seq_len: {hourly: 24}
+        seq_len: {daily: 14, hourly: 24}
         hidden_size: 64
         num_layers: 1
         dropout: 0.1

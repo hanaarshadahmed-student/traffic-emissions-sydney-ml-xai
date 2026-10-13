@@ -3,7 +3,7 @@ CO2/NO2 Traffic-Emissions Capstone -- Raw Data Combination Script
 ====================================================================
 Builds TWO final datasets from the raw traffic/weather/emissions files:
 
-  1. DAILY  -- all 19 candidate stations, daily resolution. Uses BOM daily
+  1. DAILY  -- every candidate station, daily resolution. Uses BOM daily
      weather for rural stations, so this is the only resolution at which
      every station can be included on equal footing.
 
@@ -306,6 +306,21 @@ def load_metro_weather_daily(path):
     return daily
 
 
+def add_borrowed_rain(weather, cfg, loader, keys):
+    """Some monitors (Earlwood, St Marys) record wind, temperature and humidity
+    but not rainfall. For those, STATIONS gives `rain_from` = the nearest
+    monitor that does, and its rainfall is used instead -- better than the
+    imputation step filling every hour with one constant (which would say it
+    never rained there)."""
+    source = cfg.get("rain_from")
+    if not source or ("rain_mm" in weather.columns and weather["rain_mm"].notna().any()):
+        return weather
+    rain = loader(find_metro_file(METRO_WEATHER_DIR, source))[keys + ["rain_mm"]]
+    weather = weather.drop(columns=["rain_mm"], errors="ignore").merge(rain, on=keys, how="left")
+    weather["rain_source"] = source
+    return weather
+
+
 def load_bom_weather_daily(site):
     files = glob.glob(f"{BOM_DIR}/IDCJAC*_{site}_Data.csv")
     dfs = []
@@ -360,6 +375,8 @@ def build_daily(aq_verification=None, speed_zone_info=None):
         wtype, wname = cfg["weather"]
         weather = (load_metro_weather_daily(find_metro_file(METRO_WEATHER_DIR, wname))
                    if wtype == "metro" else load_bom_weather_daily(wname))
+        if wtype == "metro":
+            weather = add_borrowed_rain(weather, cfg, load_metro_weather_daily, ["date"])
 
         merged = traffic.merge(weather, on="date", how="left")
 
@@ -487,6 +504,7 @@ def build_hourly(aq_verification=None, speed_zone_info=None):
 
         _, wname = cfg["weather"]
         weather = load_metro_weather_hourly(find_metro_file(METRO_WEATHER_DIR, wname))
+        weather = add_borrowed_rain(weather, cfg, load_metro_weather_hourly, ["date", "hour_ending"])
 
         _, ename = cfg["emissions"]
         emissions = load_metro_emissions_hourly(find_metro_file(METRO_EMISSIONS_DIR, ename))

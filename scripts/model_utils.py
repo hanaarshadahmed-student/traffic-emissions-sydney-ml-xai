@@ -152,6 +152,10 @@ def load_station_ids(grain: str, split: str) -> pd.Series:
     return pd.read_csv(path, usecols=["station_id"], dtype={"station_id": str})["station_id"]
 
 
+# per-station R2 is only reported for stations with at least this many rows
+MIN_STATION_ROWS = 30
+
+
 def evaluate_per_station(y_true, y_pred, station_ids: pd.Series) -> pd.DataFrame:
     """Same RMSE/MAE/R2 as evaluate(), broken down by station -- sorted
     worst-R2-first. Useful for telling apart "the features genuinely
@@ -159,9 +163,11 @@ def evaluate_per_station(y_true, y_pred, station_ids: pd.Series) -> pd.DataFrame
     6178-PR at ~60 rows total) are dragging the aggregate score down" --
     see the ridge note in models/models.py for why that distinction matters.
 
-    Stations with fewer than 5 eval rows get R2 = NaN rather than a
-    number: R2 computed on 2-4 points is noise, not a real error metric,
-    and would be misleading sorted in among the real ones.
+    Stations with fewer than MIN_STATION_ROWS (30) rows get R2 = NaN
+    rather than a number: R2 on a handful of days is noise, not a real
+    error metric (e.g. Military Rd once had 4 daily test rows), and would be
+    misleading among the real ones or in a median across stations. Their
+    row count, RMSE and MAE are still shown.
     """
     frame = pd.DataFrame({
         "station_id": np.asarray(station_ids),
@@ -177,7 +183,7 @@ def evaluate_per_station(y_true, y_pred, station_ids: pd.Series) -> pd.DataFrame
             "n_rows": n,
             "rmse": float(np.sqrt(mean_squared_error(group["y_true"], group["y_pred"]))),
             "mae": float(mean_absolute_error(group["y_true"], group["y_pred"])),
-            "r2": float(r2_score(group["y_true"], group["y_pred"])) if n >= 5 else float("nan"),
+            "r2": float(r2_score(group["y_true"], group["y_pred"])) if n >= MIN_STATION_ROWS else float("nan"),
         })
     result = pd.DataFrame(rows).sort_values("r2", na_position="first").reset_index(drop=True)
     _remember_predictions(result, frame)

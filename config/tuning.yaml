@@ -115,10 +115,11 @@ lstm:
 # ---------------------------------------------------------------------------
 gru:
   enabled: true
-  grains: [hourly]
+  grains: [daily, hourly]
   n_trials: 10
   fixed_params: {random_state: 42}
   window_lengths:
+    daily: {short: 7, medium: 14, long: 28}
     hourly: {short: 12, medium: 24, long: 48}
   baseline_params: {window: medium, hidden_size: 64, num_layers: 1, dropout: 0.1, learning_rate: 0.001, batch_size: 256, weight_decay: 0.0}
   required_candidates:

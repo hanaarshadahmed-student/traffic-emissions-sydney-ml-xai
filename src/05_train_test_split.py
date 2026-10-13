@@ -197,11 +197,20 @@ def split_and_scale(grain: str, manifest: dict, prune: bool = True) -> dict:
     joblib.dump(scaler, SPLITS_DIR / f"{grain}_scaler.joblib")
 
     def split_summary(part_df: pd.DataFrame) -> dict:
+        # NO2 level and spread per split. R2 = 1 - error / spread, so a split
+        # with less spread (e.g. a calmer season) gets a LOWER R2 for the
+        # same size of error -- compare these before reading a val -> test
+        # R2 drop as "the model got worse" (check RMSE too).
+        no2 = part_df["no2_pphm"]
         return {
             "rows": int(len(part_df)),
             "stations": int(part_df["station_id"].nunique()),
             "date_min": str(part_df[date_col].min()),
             "date_max": str(part_df[date_col].max()),
+            "no2_mean": round(float(no2.mean()), 4),
+            "no2_sd": round(float(no2.std()), 4),
+            "no2_sd_within_station": round(float(part_df.groupby("station_id")["no2_pphm"].std().mean()), 4),
+            "rows_per_station": {str(k): int(v) for k, v in part_df["station_id"].value_counts().sort_index().items()},
         }
 
     return {
@@ -243,6 +252,9 @@ def main():
             f"test {test['rows']:,} rows ({test['date_min']} to {test['date_max']}) "
             f"-> {grain}_train.csv / {grain}_val.csv / {grain}_test.csv"
         )
+        print("       NO2 spread (sd, pphm): " + ", ".join(
+            f"{name} {summary[name]['no2_sd']:.3f}" for name in ("train", "val", "test"))
+              + "  -- lower spread = lower R2 for the same error")
         print(
             f"       cutoffs: train < {summary['train_end_exclusive'][:10]} <= val < "
             f"{summary['val_end_exclusive'][:10]} <= test"

@@ -40,6 +40,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts import paths  # noqa: E402
+from scripts.split_utils import assign_chronological_split  # noqa: E402
 
 warnings.filterwarnings("ignore", message="DataFrame is highly fragmented")
 
@@ -549,6 +550,13 @@ def add_unexpected_traffic_features(df: pd.DataFrame, grain: str) -> pd.DataFram
     return df
 
 
+def typical_wind(df: pd.DataFrame, wind_available: pd.Series) -> float:
+    """Median wind speed over TRAIN rows with a real wind reading (train only,
+    so nothing from val/test leaks in -- same rule as the imputation in 03)."""
+    is_train = assign_chronological_split(df, "_timestamp").eq("train")
+    return float(df.loc[is_train & wind_available, "wind_speed_ms"].median())
+
+
 def add_weather_features(df: pd.DataFrame) -> pd.DataFrame:
     df["humidity_data_available"] = df["humidity_pct"].notna().astype(np.int8)
     df["humidity_pct"] = (
@@ -580,11 +588,17 @@ def add_weather_features(df: pd.DataFrame) -> pd.DataFrame:
     df["temperature_squared"] = df["temp_c"].pow(2)
     df["wind_speed_squared"] = df["wind_speed_ms"].pow(2)
     df["temperature_x_humidity"] = df["temp_c"] * df["humidity_pct"]
+    # traffic / wind: at stations with no wind sensor (MUB001), wind_speed_ms
+    # is a placeholder 0, which would make every day look dead calm and
+    # inflate this feature (~3x). Those rows use the TYPICAL wind instead
+    # (median over train rows that have real wind), so the feature there
+    # carries traffic only, with no fake "calm" signal.
+    proxy_wind = df["wind_speed_ms"].where(wind_available, typical_wind(df, wind_available))
     df["traffic_dispersion_proxy"] = safe_divide(
-        df["traffic_total_log1p"], 1.0 + df["wind_speed_ms"]
+        df["traffic_total_log1p"], 1.0 + proxy_wind
     )
     df["heavy_traffic_dispersion_proxy"] = safe_divide(
-        df["traffic_heavy_log1p"], 1.0 + df["wind_speed_ms"]
+        df["traffic_heavy_log1p"], 1.0 + proxy_wind
     )
     df["traffic_total_x_rainy"] = df["traffic_volume_total"] * df["is_rainy"]
     df["traffic_total_x_temperature"] = df["traffic_total_log1p"] * df["temp_c"]

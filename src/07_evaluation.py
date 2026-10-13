@@ -13,7 +13,9 @@ compares every method, grouped by type:
 
 What it prints (per grain):
   SUMMARY   one row per method: R2 on validation and test for each feature
-            set. Choose between methods on VALIDATION; report TEST once.
+            set, plus the MEDIAN of the per-station test R2s (stations with
+            under 30 test rows left out). Choose between methods on
+            VALIDATION; report TEST once.
   --detail  the full table, one block per method: RMSE / MAE / R2 on
             train, val and test for every feature set, plus the gaps
             (train >> val = overfitting; val ~= test = val was a fair
@@ -133,14 +135,33 @@ def _feature_sets(df: pd.DataFrame) -> list[str]:
 # Tables
 # ---------------------------------------------------------------------------
 
+def station_median_r2(model: str, stage: str, grain: str, feature_set: str, split: str = "test") -> float:
+    """Median of the per-station R2 values (results/latest/per_station/),
+    leaving out stations with too few rows (R2 = NaN there, see
+    evaluate_per_station). The pooled R2 also rewards getting the
+    DIFFERENCES between stations right; the median shows how well a typical
+    station's own ups and downs are predicted."""
+    path = paths.PER_STATION_DIR / f"{model}_{stage}_{grain}_{feature_set}_{split}.csv"
+    if not path.exists():
+        return np.nan
+    return float(pd.read_csv(path)["r2"].median())
+
+
 def summary_table(df: pd.DataFrame) -> pd.DataFrame:
-    """One row per method; columns (feature set, val R2 / test R2)."""
+    """One row per method; columns (feature set, val R2 / test R2 / test
+    per-station median R2)."""
     sub = df[df["split"].isin(["val", "test"])]
     table = sub.pivot_table(index=["type", "method"], columns=["feature_set", "split"], values="r2")
     sets = _feature_sets(df)
     columns = [(fs, sp) for fs in sets for sp in ("val", "test") if (fs, sp) in table.columns]
     table = table.reindex(columns=pd.MultiIndex.from_tuples(columns))
     table.columns = pd.MultiIndex.from_tuples([(fs, f"{sp} R2") for fs, sp in table.columns])
+    names = df.drop_duplicates("method").set_index("method")[["model", "stage", "grain"]]
+    for fs in sets:
+        if (fs, "test R2") in table.columns:
+            position = list(table.columns).index((fs, "test R2")) + 1
+            values = [station_median_r2(*names.loc[method], fs) for _, method in table.index]
+            table.insert(position, (fs, "test station-median R2"), values)
     order = _method_order(df)
     table = table.reindex(sorted(table.index, key=lambda ix: order.index(ix[1])))
     table.index.names = ["type", "method"]

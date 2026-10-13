@@ -200,3 +200,29 @@ keys, one-hot groups exclusive, `heavy_vehicle_share` in [0, 1], NO2 lags
 only look backwards).
 
 Rebuild with `python run_pipeline.py` (see the main `README.md`).
+
+## Final-run data additions and fixes (October 2026)
+
+- **Two new stations**, each with its own NO2 monitor (no monitor shared with
+  another station): `24223` Canterbury Rd, Canterbury -> EARLWOOD (1.78 km) and
+  `7123-PR` Pages Rd, St Marys -> ST MARYS (2.84 km). Stacey St, Bankstown
+  (`7248`) was considered but its monitor, CHULLORA, has no NO2 or weather
+  data for 2024-25.
+- **Rainfall borrowed:** EARLWOOD and ST MARYS record wind, temperature and
+  humidity but not rain, so rain comes from the nearest monitor that does
+  (ROZELLE and PARRAMATTA NORTH; `rain_from` in `scripts/stations.py`,
+  column `rain_source` in the combined datasets).
+- **`6109` Federal Hwy extended to Dec 2025:** the original counter (6109)
+  stopped in early March 2025 and was replaced by `T6109S` at the same spot
+  (same road, same southbound direction, similar volumes). The two records are
+  joined at 28 Feb 2025 (6109 before, T6109S from then on) in
+  `data/raw/traffic/6109 - M23 Federal Highway.csv`.
+- **Hour ending 02:00 is thin:** NO2 is missing for that hour on ~80% of days at
+  every monitor (almost all of 2024, ~60% of 2025) -- a network-wide gap,
+  most likely the routine overnight instrument check. The readings that do
+  exist sit between the 1 am and 3 am values, so they are kept; by-hour
+  charts mark that hour as based on few readings.
+- **`traffic_dispersion_proxy` at stations without wind data (MUB001):** the
+  wind placeholder of 0 made every day look dead calm and inflated the
+  feature about 3x. Those rows now use the typical (train-median) wind
+  instead, so the feature carries traffic only there.

@@ -10,6 +10,8 @@ its traffic, weather and emissions files in data/raw/ (see README).
                         None                      = no NO2 data for this station
   aq_site               the air-quality monitor the NO2 comes from
   aq_distance_km        distance from the traffic counter to that monitor
+  rain_from             (optional) weather-file keyword to take rainfall from,
+                        for monitors that don't record rain themselves
 
 station_label() turns an id into a readable name for tables and charts,
 e.g. "7212" -> "7212 Stewart Ave, Newcastle West".
@@ -39,6 +41,8 @@ STATIONS = {
     "21229 - Military Road":        {"lat": -33.830160, "lon": 151.217280, "suburb": "Neutral Bay",     "lga": "North Sydney",     "weather": ("metro", "cammeray"),         "emissions": ("metro", "cammeray"),         "aq_site": "CAMMERAY",         "aq_distance_km": 0.33},
     "50240 - Briens Road":          {"lat": -33.796436, "lon": 150.987595, "suburb": "Northmead",       "lga": "Parramatta",       "weather": ("metro", "parramatta_north"), "emissions": ("metro", "parramatta_north"), "aq_site": "PARRAMATTA NORTH", "aq_distance_km": 1.0},
     "7289 - Thomas Street":         {"lat": -32.906013, "lon": 151.671356, "suburb": "Wallsend",        "lga": "Newcastle",        "weather": ("metro", "wallsend"),         "emissions": ("metro", "wallsend"),         "aq_site": "WALLSEND",         "aq_distance_km": 1.3},
+    "24223 - Canterbury Road":      {"lat": -33.913470, "lon": 151.116730, "suburb": "Canterbury",      "lga": "Canterbury-Bankstown", "weather": ("metro", "earlwood"),     "emissions": ("metro", "earlwood"),         "aq_site": "EARLWOOD",         "aq_distance_km": 1.78, "rain_from": "rozelle"},
+    "7123-PR - Pages Road":         {"lat": -33.769588, "lon": 150.768738, "suburb": "St Marys",        "lga": "Penrith",          "weather": ("metro", "st_marys"),         "emissions": ("metro", "st_marys"),         "aq_site": "ST MARYS",         "aq_distance_km": 2.84, "rain_from": "parramatta_north"},
 }
 
 # shorter road names so labels fit on chart axes
