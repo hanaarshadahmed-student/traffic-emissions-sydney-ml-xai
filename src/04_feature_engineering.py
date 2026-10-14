@@ -1,25 +1,9 @@
 """
-CO2/NO2 Traffic-Emissions Capstone -- Stage 04: Feature engineering
+Feature engineering: builds the model features (NO2 lags, traffic, weather, calendar, road and station info) for the daily and hourly data, and checks the output (no missing values, no lags that look ahead) before saving.
 
-Exact-timestamp lags with availability flags (no assumption of contiguous
-rows), directional traffic features from the raw per-station counter files,
-station metadata (road classification, RMS region, device type),
-physically-motivated weather features (wind vector decomposition,
-dispersion proxy), time-aware rolling windows, plus two EDA-validated
-groupings: a coarse Highway/Major Road/Local Street bucket from the road's
-own name, and a Summer/Autumn/Winter/Spring season one-hot.
-
-validate_output() checks every build before it's written (no NaNs/infs or
-duplicate keys, one-hot groups are exclusive, heavy_vehicle_share within
-[0, 1], NO2 lag features only look backwards) and stops with an error if
-any check fails.
-
-Input:  data/processed/final_daily.csv
-        data/processed/final_hourly.csv
-        data/raw/traffic/station_reference.csv
-Output: data/processed/features_daily.csv    (zero NaNs, model-ready)
-        data/processed/features_hourly.csv   (zero NaNs, model-ready)
-        data/processed/feature_manifest.json (target/exogenous/AR feature lists per grain)
+Usage:
+    python src/04_feature_engineering.py
+    python run_pipeline.py --stage features
 """
 
 from __future__ import annotations
@@ -34,12 +18,10 @@ import numpy as np
 import pandas as pd
 
 import sys
-
-# Repo root on the import path, so the shared code in scripts/ is importable
-# whichever folder you run this from.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts import paths  # noqa: E402
+from scripts.split_utils import assign_chronological_split  # noqa: E402
 
 warnings.filterwarnings("ignore", message="DataFrame is highly fragmented")
 
@@ -57,13 +39,6 @@ MANIFEST_OUTPUT = paths.FEATURE_MANIFEST_PATH
 
 TARGET_COLUMNS = ["no2_pphm", "target_no2_log1p", "target_no2_sqrt"]
 SAMPLE_WEIGHT_COLUMN = "aq_quality_weight"
-# Monotonic time-trend columns. Kept in the CSV for reference, but NOT
-# offered to models: val/test dates are always later than train, so these
-# take values a model has never seen, and tree models can't extrapolate --
-# random forest ranked days_since_start its #1 feature and its exogenous
-# test R2 collapsed to -11. (Grange & Carslaw's meteorological
-# normalisation uses a trend term deliberately, but for explaining the
-# past, not forecasting a later period.)
 TIME_TREND_COLUMNS = ["calendar_year", "days_since_start"]
 BASE_METADATA_COLUMNS = [
     "date",
@@ -153,16 +128,6 @@ def validate_source(df: pd.DataFrame, grain: str) -> pd.DataFrame:
         "rain_mm",
         "no2_pphm",
         "aq_distance_km",
-        # NOTE: posted_speed_kmh is intentionally NOT required here.
-        # 01_data_ingestion.py documents it as optional -- it only gets
-        # created when data/raw/speed_zones/Speed_Zones.shp is present
-        # locally. Requiring it here would make the whole feature-
-        # engineering step fail on any machine that doesn't have that
-        # (fairly large, easy to forget) shapefile checked out, even
-        # though every downstream step already handles its absence fine
-        # (it's a plain numeric feature with no other code depending on
-        # its name, so it simply doesn't appear in the candidate feature
-        # list when missing -- see feature_lists()).
     ]
     if grain == "hourly":
         required.append("hour_ending")
@@ -241,13 +206,6 @@ def add_calendar_features(df: pd.DataFrame, grain: str) -> pd.DataFrame:
 
 
 def add_season_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Coarse 4-bucket season grouping, kept alongside the continuous
-    month_sin/month_cos cyclical encoding added above. EDA Part 1.5 found a
-    statistically significant weekday/weekend NO2 difference and treated
-    season as a natural extension of the temperature seasonality seen in
-    Part 0.4. The cyclical encoding already carries this information for
-    tree/linear models, but the discrete one-hot is kept too since it reads
-    directly off a SHAP plot in a way sin/cos pairs don't."""
     df["season"] = df["calendar_month"].map(SEASON_MAP)
     dummies = pd.get_dummies(df["season"], dtype=np.int8)
     dummies.columns = [f"season_{slug(value)}" for value in dummies.columns]
@@ -255,9 +213,6 @@ def add_season_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def classify_named_road_type(name: object) -> str:
-    """Coarse 3-bucket grouping (Highway / Major Road / Local Street) from
-    keyword-matching the road's own name, used throughout the EDA notebook
-    (Part 1.6)."""
     n = str(name).lower()
     if "highway" in n or "motorway" in n or "freeway" in n:
         return "Highway"
@@ -268,14 +223,6 @@ def classify_named_road_type(name: object) -> str:
 
 
 def add_named_road_type_features(df: pd.DataFrame) -> pd.DataFrame:
-    """EDA Part 1.6: the heavy-vehicle-% vs NO2 relationship changes sign
-    depending on this 3-bucket road type (Highway +0.12, Local Street +0.18,
-    Major Road -0.10) -- pooling across road types hid this, so it's kept as
-    its own coarse grouping. This is distinct from (and complements) the
-    `road_classification_type` one-hot below, which comes from the raw RMS
-    road-name suffix (Road/Highway/Street/Way/Drive/Motorway/HWY/RD/...,
-    ~30 messy categories with inconsistent casing) rather than this cleaned,
-    EDA-validated 3-way split."""
     df["road_type_bucket"] = df["station_name"].apply(classify_named_road_type)
     dummies = pd.get_dummies(df["road_type_bucket"], dtype=np.int8)
     dummies.columns = [f"road_bucket_{slug(value)}" for value in dummies.columns]
@@ -508,7 +455,31 @@ def add_traffic_features(df: pd.DataFrame, grain: str) -> pd.DataFrame:
             prior_std,
         ).where(prior_std.gt(0), 0.0)
 
+    df = add_unexpected_traffic_features(df, grain)
     return df.drop(columns="traffic_volume_light")
+
+
+def add_unexpected_traffic_features(df: pd.DataFrame, grain: str) -> pd.DataFrame:
+    slot = df["calendar_day_of_week"].astype(int)
+    if grain == "hourly":
+        slot = slot * 24 + df["hour_of_day"].astype(int)
+    keys = [df["station_id"], slot.rename("_slot")]
+    for column in ["traffic_volume_total", "traffic_volume_heavy"]:
+        prefix = column.removeprefix("traffic_volume_")
+        usual = df.groupby(keys, sort=False)[column].transform(
+            lambda values: values.shift(1).expanding(min_periods=1).mean()
+        )
+        # capped at +-3 (about 20x more / less than usual): beyond that it is a
+        # counter fault (e.g. an hour logged as 0 vehicles), not real traffic
+        surprise = (np.log1p(df[column].astype(float)) - np.log1p(usual)).clip(-3.0, 3.0)
+        df[f"traffic_{prefix}_unexpected_available"] = usual.notna().astype(np.int8)
+        df[f"traffic_{prefix}_unexpected"] = surprise.where(usual.notna(), 0.0)
+    return df
+
+
+def typical_wind(df: pd.DataFrame, wind_available: pd.Series) -> float:
+    is_train = assign_chronological_split(df, "_timestamp").eq("train")
+    return float(df.loc[is_train & wind_available, "wind_speed_ms"].median())
 
 
 def add_weather_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -542,11 +513,12 @@ def add_weather_features(df: pd.DataFrame) -> pd.DataFrame:
     df["temperature_squared"] = df["temp_c"].pow(2)
     df["wind_speed_squared"] = df["wind_speed_ms"].pow(2)
     df["temperature_x_humidity"] = df["temp_c"] * df["humidity_pct"]
+    proxy_wind = df["wind_speed_ms"].where(wind_available, typical_wind(df, wind_available))
     df["traffic_dispersion_proxy"] = safe_divide(
-        df["traffic_total_log1p"], 1.0 + df["wind_speed_ms"]
+        df["traffic_total_log1p"], 1.0 + proxy_wind
     )
     df["heavy_traffic_dispersion_proxy"] = safe_divide(
-        df["traffic_heavy_log1p"], 1.0 + df["wind_speed_ms"]
+        df["traffic_heavy_log1p"], 1.0 + proxy_wind
     )
     df["traffic_total_x_rainy"] = df["traffic_volume_total"] * df["is_rainy"]
     df["traffic_total_x_temperature"] = df["traffic_total_log1p"] * df["temp_c"]

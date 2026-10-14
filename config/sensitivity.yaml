@@ -1,0 +1,32 @@
+# Sensitivity runs -- each one is the main config (config.yaml) with a few
+# settings changed. Only the CHANGES are listed here, so these runs always
+# match the main config in everything else.
+#
+# Run one with:   python run_pipeline.py --sensitivity <name>
+#
+# A sensitivity run uses its own folders (data/processed_sensitivity/<name>/
+# and working/sensitivity/<name>/), so it never overwrites the main data or
+# results, and it skips tuning (default settings are compared with the main
+# run's default settings). Compare its working/sensitivity/<name>/latest/
+# evaluation/ tables with working/latest/evaluation/.
+
+no2_clipped:
+  description: negative NO2 readings set to 0 instead of kept as recorded
+  changes:
+    data:
+      clip_negative_no2: true
+
+no_exclusions:
+  description: Port Macquarie stations (6124, 6119-PR) kept in
+  changes:
+    data:
+      station_exclusions:
+        enabled: false
+
+no_mub001:
+  description: station MUB001 left out (its NO2 monitor is 83.2 km away)
+  changes:
+    data:
+      station_exclusions:
+        stations:
+          MUB001: "SENSITIVITY ONLY: 83.2 km from ALBURY monitor (flagged REVIEW)"

@@ -1,35 +1,9 @@
 """
-CO2/NO2 Traffic-Emissions Capstone -- Stage 07: Evaluation / method comparison
-
-Reads results/results.json (nothing is retrained, so it's instant) and
-compares every method, grouped by type:
-
-  Baseline methods (not ML -- the bar to beat)
-      B1 Persistence, B2 Seasonal climatology
-  ML models
-      1 Ridge, 2 Decision tree, 3 Random forest, 4 XGBoost, 5 SVR, 6 LSTM,
-      7 GRU
-      (each as "default" = config.yaml settings, and "tuned" once tuned)
-
-What it prints (per grain):
-  SUMMARY   one row per method: R2 on validation and test for each feature
-            set. Choose between methods on VALIDATION; report TEST once.
-  --detail  the full table, one block per method: RMSE / MAE / R2 on
-            train, val and test for every feature set, plus the gaps
-            (train >> val = overfitting; val ~= test = val was a fair
-            stand-in for unseen data).
-
-Outputs (results/evaluation/):
-  summary_<grain>.csv / .png        the summary table + chart (start here)
-  train_val_test_<grain>.csv / .png the full detail table + chart
-  stage_delta_<grain>.csv           tuned minus default, when tuning has run
-  all_results.csv                   every results.json row, flattened
+Evaluation: compares every baseline and ML model (default and tuned) from results.json and saves summary tables and charts. Nothing is retrained.
 
 Usage:
     python src/07_evaluation.py
-    python src/07_evaluation.py --detail                 # + full tables
-    python src/07_evaluation.py --grain daily --model ridge lstm
-    python src/07_evaluation.py --trials                 # + every tuning trial
+    python src/07_evaluation.py --detail      # full train/val/test tables
 """
 
 from __future__ import annotations
@@ -52,7 +26,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts import paths  # noqa: E402
-from scripts.models import BASELINE_METHODS, REGISTRY, display_name, model_type  # noqa: E402
+from models.models import BASELINE_METHODS, REGISTRY, display_name, model_type  # noqa: E402
 
 ROOT_DIR = paths.ROOT_DIR
 RESULTS_PATH = paths.RESULTS_PATH
@@ -133,14 +107,33 @@ def _feature_sets(df: pd.DataFrame) -> list[str]:
 # Tables
 # ---------------------------------------------------------------------------
 
+def station_median_r2(model: str, stage: str, grain: str, feature_set: str, split: str = "test") -> float:
+    """Median of the per-station R2 values (working/latest/per_station/),
+    leaving out stations with too few rows (R2 = NaN there, see
+    evaluate_per_station). The pooled R2 also rewards getting the
+    DIFFERENCES between stations right; the median shows how well a typical
+    station's own ups and downs are predicted."""
+    path = paths.PER_STATION_DIR / f"{model}_{stage}_{grain}_{feature_set}_{split}.csv"
+    if not path.exists():
+        return np.nan
+    return float(pd.read_csv(path)["r2"].median())
+
+
 def summary_table(df: pd.DataFrame) -> pd.DataFrame:
-    """One row per method; columns (feature set, val R2 / test R2)."""
+    """One row per method; columns (feature set, val R2 / test R2 / test
+    per-station median R2)."""
     sub = df[df["split"].isin(["val", "test"])]
     table = sub.pivot_table(index=["type", "method"], columns=["feature_set", "split"], values="r2")
     sets = _feature_sets(df)
     columns = [(fs, sp) for fs in sets for sp in ("val", "test") if (fs, sp) in table.columns]
     table = table.reindex(columns=pd.MultiIndex.from_tuples(columns))
     table.columns = pd.MultiIndex.from_tuples([(fs, f"{sp} R2") for fs, sp in table.columns])
+    names = df.drop_duplicates("method").set_index("method")[["model", "stage", "grain"]]
+    for fs in sets:
+        if (fs, "test R2") in table.columns:
+            position = list(table.columns).index((fs, "test R2")) + 1
+            values = [station_median_r2(*names.loc[method], fs) for _, method in table.index]
+            table.insert(position, (fs, "test station-median R2"), values)
     order = _method_order(df)
     table = table.reindex(sorted(table.index, key=lambda ix: order.index(ix[1])))
     table.index.names = ["type", "method"]

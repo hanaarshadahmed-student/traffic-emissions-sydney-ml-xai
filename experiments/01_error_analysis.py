@@ -1,0 +1,200 @@
+"""
+Error analysis: shows where each model’s NO2 predictions go wrong (by hour, month, station, traffic and NO2 level).
+Usage:
+    python experiments/01_error_analysis.py                  
+    python experiments/01_error_analysis.py --grain hourly --feature-set exogenous
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts import paths  # noqa: E402
+from scripts.stations import station_label  # noqa: E402
+
+OUT_DIR = paths.ERROR_ANALYSIS_DIR
+DISPLAY = {
+    "naive_persistence": "B1 Persistence",
+    "ridge": "Ridge", "decision_tree": "Decision tree", "random_forest": "Random forest",
+    "xgboost": "XGBoost", "svr": "SVR", "lstm": "LSTM", "gru": "GRU",
+}
+FILE_RE = re.compile(r"^(?P<model>.+)_(?P<stage>default|tuned)_(?P<grain>daily|hourly)_"
+                     r"(?P<feature_set>exogenous|autoregressive|all)_(?P<split>val|test)\.csv\.gz$")
+MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def load(grain: str, split: str, feature_set: str) -> pd.DataFrame | None:
+    """One long table: split metadata + y_true + one y_pred column per model."""
+    files = []
+    for path in paths.PREDICTIONS_DIR.glob(f"*_{grain}_*_{split}.csv.gz"):
+        m = FILE_RE.match(path.name)
+        if not m or m["model"] not in DISPLAY:
+            continue
+        if m["model"] != "naive_persistence" and m["feature_set"] != feature_set:
+            continue
+        files.append({**m.groupdict(), "path": path, "_rank": int(m["stage"] != "tuned")})
+    if not files:
+        print(f"[{grain}/{split}/{feature_set}] no prediction files -- skipped")
+        return None
+    chosen = (pd.DataFrame(files).sort_values("_rank")
+              .drop_duplicates("model").set_index("model"))
+
+    meta = pd.read_csv(paths.SPLITS_DIR / f"{grain}_{split}.csv",
+                       usecols=["station_id", "timestamp", "school_holiday", "road_type_bucket", "no2_pphm",
+                                "traffic_volume_total"],
+                       dtype={"station_id": str})
+    ts = pd.to_datetime(meta["timestamp"])
+    frame = pd.DataFrame({
+        "station_id": meta["station_id"],
+        "station": meta["station_id"].map(station_label),
+        "road_type": meta["road_type_bucket"],
+        "hour": ts.dt.hour,
+        "day_type": np.where(ts.dt.dayofweek >= 5, "weekend", "weekday"),
+        "school_hol": np.where(meta["school_holiday"].fillna(0).astype(int) == 1,
+                               "school holiday", "term time"),
+        "month": pd.Categorical(ts.dt.month.map(lambda m: MONTHS[m - 1]), MONTHS, ordered=True),
+        "y_true": meta["no2_pphm"].to_numpy(float),
+    })
+    frame["traffic_level"] = (
+        meta.groupby("station_id")["traffic_volume_total"]
+        .transform(lambda v: pd.qcut(v.rank(method="first"), 5, labels=False))
+        .map({0: "1 quietest", 1: "2", 2: "3", 3: "4", 4: "5 busiest"})
+    )
+    frame["traffic_level"] = pd.Categorical(frame["traffic_level"],
+                                            ["1 quietest", "2", "3", "4", "5 busiest"], ordered=True)
+    frame["no2_level"] = pd.qcut(frame["y_true"].rank(method="first"), 5,
+                                 labels=["1 lowest", "2", "3", "4", "5 highest"])
+    order = [m for m in DISPLAY if m in chosen.index]
+    for model in order:
+        pred = pd.read_csv(chosen.loc[model, "path"], dtype={"station_id": str}).sort_values("row")
+        if len(pred) != len(frame) or not (pred["station_id"].to_numpy() == frame["station_id"].to_numpy()).all():
+            raise SystemExit(f"{chosen.loc[model, 'path'].name} doesn't line up with the current "
+                             f"{grain}_{split}.csv -- it comes from a different run. Rerun the pipeline.")
+        frame[DISPLAY[model]] = pred["y_pred"].to_numpy(float)
+    frame.attrs["models"] = [DISPLAY[m] for m in order]
+    frame.attrs["stages"] = {DISPLAY[m]: chosen.loc[m, "stage"] for m in order}
+    return frame
+
+
+def breakdown(frame: pd.DataFrame, by: str) -> pd.DataFrame:
+    rows = []
+    for group, part in frame.groupby(by, observed=True, sort=True):
+        row = {by: group, "n_rows": len(part), "n_stations": part["station"].nunique(),
+               "mean_no2": part["y_true"].mean()}
+        for model in frame.attrs["models"]:
+            err = part[model] - part["y_true"]
+            row[f"{model} | rmse"] = float(np.sqrt(np.mean(err ** 2)))
+            row[f"{model} | mae"] = float(np.mean(np.abs(err)))
+            row[f"{model} | bias"] = float(np.mean(err))
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def plot(table: pd.DataFrame, by: str, models: list[str], title: str, path: Path) -> None:
+    labels = table[by].astype(str).tolist()
+    x = np.arange(len(labels))
+    line = by in ("hour", "month", "no2_level", "traffic_level")
+    fig, axes = plt.subplots(2, 1, figsize=(max(6.5, 0.45 * len(labels) + 3), 7), sharex=True)
+    width = 0.8 / len(models)
+    for i, model in enumerate(models):
+        style = dict(color="#8a8a8a", linestyle="--") if model.startswith("B1") else {}
+        for ax, metric in zip(axes, ("rmse", "bias")):
+            values = table[f"{model} | {metric}"]
+            if line:
+                ax.plot(x, values, marker="o", markersize=3, label=model, **style)
+            else:
+                ax.bar(x - 0.4 + width * (i + 0.5), values, width, label=model,
+                       color=style.get("color"))
+    axes[0].set_ylabel("RMSE (pphm)")
+    axes[1].set_ylabel("bias (pphm)\n< 0 = under-predicts")
+    axes[1].axhline(0, color="#555555", linewidth=0.8)
+    if by == "station":  # long names: slant them
+        axes[1].set_xticks(x, labels, rotation=35, ha="right", fontsize=8)
+    else:
+        axes[1].set_xticks(x, labels, rotation=0 if len(labels) <= 12 else 90)
+    axes[1].set_xlabel({"no2_level": "actual NO$_2$ level (fifths, lowest to highest)",
+                        "school_hol": "school holiday",
+                        "traffic_level": "traffic level for that road (fifths, quietest to busiest)"}.get(by, by.replace("_", " ")))
+    for ax in axes:
+        ax.grid(alpha=0.3)
+    axes[0].legend(fontsize=8, ncol=2)
+    axes[0].set_title(title)
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
+def run(grain: str, split: str, feature_set: str) -> None:
+    frame = load(grain, split, feature_set)
+    if frame is None:
+        return
+    models = frame.attrs["models"]
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"\n{grain} | {split} | {feature_set} features: {len(frame):,} rows, "
+          f"{frame['station'].nunique()} stations; models: "
+          + ", ".join(f"{m} ({frame.attrs['stages'][m]})" for m in models))
+
+    breakdowns = ["day_type", "school_hol", "month", "station", "road_type", "traffic_level", "no2_level"]
+    if grain == "hourly":
+        breakdowns.insert(0, "hour")
+    for by in breakdowns:
+        table = breakdown(frame, by)
+        if len(table) < 2:
+            print(f"  {by}: only one group in {split} rows ({table[by].iloc[0]}) -- skipped")
+            continue
+        tag = f"{grain}_{split}_{feature_set}_{by}"
+        table.to_csv(OUT_DIR / f"errors_{tag}.csv", index=False)
+        plot(table, by, models, f"{grain.capitalize()} NO$_2$ errors by {by.replace('_', ' ')} "
+             f"({split}, {feature_set} features)", OUT_DIR / f"errors_{tag}.png")
+        print_table(table, by, models)
+
+    # road type needs the validation rows (test is a single road type)
+    if split == "test" and frame["road_type"].nunique() < 2:
+        val = load(grain, "val", feature_set)
+        if val is not None and val["road_type"].nunique() > 1:
+            table = breakdown(val, "road_type")
+            tag = f"{grain}_val_{feature_set}_road_type"
+            table.to_csv(OUT_DIR / f"errors_{tag}.csv", index=False)
+            plot(table, "road_type", val.attrs["models"],
+                 f"{grain.capitalize()} NO$_2$ errors by road type (val, {feature_set} features)",
+                 OUT_DIR / f"errors_{tag}.png")
+            print("  road_type -- from VALIDATION rows (test is all one road type):")
+            print_table(table, "road_type", val.attrs["models"])
+
+
+def print_table(table: pd.DataFrame, by: str, models: list[str]) -> None:
+    cols = [by, "n_rows", "n_stations", "mean_no2"] + [f"{m} | rmse" for m in models]
+    shown = table[cols].rename(columns=lambda c: c.replace(" | rmse", ""))
+    print(f"  RMSE by {by}:")
+    print("    " + shown.to_string(index=False, float_format=lambda v: f"{v:.3f}").replace("\n", "\n    "))
+    bias = table.set_index(by)[[f"{m} | bias" for m in models if not m.startswith("B1")]].mean(axis=1)
+    print(f"    mean bias of the ML models: " + ", ".join(f"{k}: {v:+.3f}" for k, v in bias.items()))
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Break prediction errors down by time, station and NO2 level.")
+    parser.add_argument("--grain", nargs="+", choices=["daily", "hourly"], default=["daily", "hourly"])
+    parser.add_argument("--split", choices=["val", "test"], default="test")
+    parser.add_argument("--feature-set", choices=["exogenous", "autoregressive", "all"], default="all")
+    parser.add_argument("--config", type=Path, default=paths.CONFIG_PATH,
+                        help="accepted for run_pipeline.py; not used (scores saved predictions only)")
+    args = parser.parse_args()
+    for grain in args.grain:
+        run(grain, args.split, args.feature_set)
+    print(f"\nSaved to {OUT_DIR.relative_to(paths.ROOT_DIR)}/")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,46 @@
+grain,feature_set,best,model,stage,r2_difference,diff_lo,diff_hi,verdict
+daily,exogenous,GRU,B1 Persistence,default,0.5131649667684772,0.4107926711898171,0.618570068265689,worse than best
+daily,exogenous,GRU,B2 Seasonal climatology,default,0.4073250837785088,0.3265886206379664,0.4888300457345857,worse than best
+daily,exogenous,GRU,Ridge,tuned,0.2192433842053172,0.1633035282198557,0.27777908995877,worse than best
+daily,exogenous,GRU,Decision tree,tuned,0.4004979337500581,0.3252190748902578,0.4871613747687347,worse than best
+daily,exogenous,GRU,Random forest,tuned,0.1058996161965554,0.0641950028151859,0.1520269904202992,worse than best
+daily,exogenous,GRU,XGBoost,tuned,0.0434830239785097,0.008260756173594,0.0799012425359417,worse than best
+daily,exogenous,GRU,SVR,tuned,0.0420465298857581,0.0047538105941603,0.0759604158742205,worse than best
+daily,exogenous,GRU,LSTM,tuned,0.0100926088452568,-0.0108885682536093,0.0327612776571277,not distinguishable from best
+daily,autoregressive,SVR,Ridge,tuned,0.0153797330178001,-0.001385052121956,0.0334708259263437,not distinguishable from best
+daily,autoregressive,SVR,Decision tree,tuned,0.0742732853770355,0.0477702777263277,0.101129834157477,worse than best
+daily,autoregressive,SVR,Random forest,tuned,0.0206450766908633,-0.0011907064445175,0.0377277288724879,not distinguishable from best
+daily,autoregressive,SVR,XGBoost,tuned,0.007895172917631,-0.0073293316728519,0.0227657969418075,not distinguishable from best
+daily,autoregressive,SVR,LSTM,tuned,0.0147979170850737,-0.002166343329546,0.0321778937562801,not distinguishable from best
+daily,autoregressive,SVR,GRU,tuned,0.0272508802718214,0.0094213628909616,0.0453978388483147,worse than best
+daily,autoregressive,SVR,B1 Persistence,default,0.2874172305051505,0.2283600742918504,0.3512452621928716,worse than best
+daily,autoregressive,SVR,B2 Seasonal climatology,default,0.1815773475151821,0.1103769284055045,0.2560689864247097,worse than best
+daily,all,GRU,Ridge,tuned,0.0774033416069085,0.0455192640980853,0.1081521921670096,worse than best
+daily,all,GRU,Decision tree,tuned,0.2844341492885519,0.2292502763399172,0.3484019762255082,worse than best
+daily,all,GRU,Random forest,tuned,0.0998966275375767,0.0648170176883386,0.1378803634890618,worse than best
+daily,all,GRU,XGBoost,tuned,0.0024987770712556,-0.020534488058872,0.0255100084107147,not distinguishable from best
+daily,all,GRU,SVR,tuned,0.027848319107696,0.0031136657585622,0.0499755535605852,worse than best
+daily,all,GRU,LSTM,tuned,0.0073539266898355,-0.0132261371498135,0.0277974005997258,not distinguishable from best
+daily,all,GRU,B1 Persistence,default,0.5495906803852596,0.4578548040134746,0.645855488177621,worse than best
+daily,all,GRU,B2 Seasonal climatology,default,0.4437507973952912,0.3668739792715913,0.5277407670160403,worse than best
+hourly,exogenous,GRU,B1 Persistence,default,-0.0210417534506948,-0.0438136169563439,0.0027064593566029,not distinguishable from best
+hourly,exogenous,GRU,B2 Seasonal climatology,default,0.48126474687283,0.4457792944361395,0.5189798501602388,worse than best
+hourly,exogenous,GRU,Ridge,tuned,0.3040143705193533,0.2742470632170083,0.3357910979371777,worse than best
+hourly,exogenous,GRU,Decision tree,tuned,0.2658742112251649,0.2398347004756042,0.2931456468001818,worse than best
+hourly,exogenous,GRU,Random forest,tuned,0.1140993970258295,0.0934111944576553,0.1347662158113474,worse than best
+hourly,exogenous,GRU,XGBoost,tuned,0.0710445654629083,0.0523477985164914,0.0897062925056246,worse than best
+hourly,exogenous,GRU,LSTM,tuned,0.0169468387691122,0.0063620983551365,0.027951765960598,worse than best
+hourly,autoregressive,LSTM,Ridge,tuned,0.0344215771240232,0.0303107059810118,0.0384940216999674,worse than best
+hourly,autoregressive,LSTM,Decision tree,tuned,0.0265353437470148,0.0230135447426624,0.0299993233778984,worse than best
+hourly,autoregressive,LSTM,Random forest,tuned,0.0195175518501525,0.0163193772817363,0.0224217456147473,worse than best
+hourly,autoregressive,LSTM,XGBoost,tuned,0.020114421908408,0.0166797790313722,0.0235354078845426,worse than best
+hourly,autoregressive,LSTM,GRU,tuned,0.0022424202434664,0.0001654870876007,0.0044830945081162,worse than best
+hourly,autoregressive,LSTM,B1 Persistence,default,0.0643095243591558,0.0579865951917634,0.0706684645638769,worse than best
+hourly,autoregressive,LSTM,B2 Seasonal climatology,default,0.5666160246826807,0.5310670960255083,0.6060447938719595,worse than best
+hourly,all,LSTM,Ridge,tuned,0.0677405710438613,0.0614253803594137,0.074970477305867,worse than best
+hourly,all,LSTM,Decision tree,tuned,0.0747586001012323,0.0686406537962843,0.0810424151779144,worse than best
+hourly,all,LSTM,Random forest,tuned,0.0383532734832346,0.0336171356650905,0.043601818450431,worse than best
+hourly,all,LSTM,XGBoost,tuned,0.0081909683022304,0.0041313335116844,0.0124847306830903,worse than best
+hourly,all,LSTM,GRU,tuned,0.0001428156392438,-0.0023376165453758,0.0026935174539214,not distinguishable from best
+hourly,all,LSTM,B1 Persistence,default,0.1408484039142125,0.1283140721321482,0.1549197603602005,worse than best
+hourly,all,LSTM,B2 Seasonal climatology,default,0.6431549042377374,0.6089079777446306,0.6795799529175071,worse than best

@@ -1,0 +1,124 @@
+# Effective config for this run = config/config.yaml + command-line overrides: --experiments --jobs 6
+# Re-run exactly with:  python run_pipeline.py --config <this file>
+
+pipeline:
+  stage: all
+  run_tuning: true
+  run_experiments: true
+  jobs: 6
+  save_run: true
+data:
+  clip_negative_no2: false
+  station_exclusions:
+    enabled: true
+    stations:
+      '6124': 'PORT MACQUARIE AQ site: >3x year-on-year NO2 shift unrelated to traffic;
+        36.9 km from monitor'
+      6119-PR: 'PORT MACQUARIE AQ site: >3x year-on-year NO2 shift unrelated to traffic;
+        87.3 km from monitor'
+training:
+  grain:
+  - daily
+  - hourly
+  feature_sets:
+  - exogenous
+  - autoregressive
+  - all
+  split: val
+  report_splits:
+  - train
+  - val
+  - test
+  baselines:
+    naive_persistence: true
+    naive_seasonal_climatology: true
+  models:
+    ridge:
+      enabled: true
+      params:
+        alpha: 1.0
+        random_state: 42
+    decision_tree:
+      enabled: true
+      params:
+        max_depth: 8
+        min_samples_leaf: 5
+        random_state: 42
+    random_forest:
+      enabled: true
+      params:
+        n_estimators: 300
+        max_depth: null
+        min_samples_leaf: 5
+        n_jobs: -1
+        random_state: 42
+    xgboost:
+      enabled: true
+      params:
+        objective: reg:squarederror
+        n_estimators: 500
+        learning_rate: 0.03
+        max_depth: 4
+        min_child_weight: 5
+        subsample: 0.8
+        colsample_bytree: 0.8
+        reg_alpha: 0.0
+        reg_lambda: 1.0
+        tree_method: hist
+        eval_metric: rmse
+        n_jobs: -1
+        random_state: 42
+    svr:
+      enabled: true
+      grains:
+      - daily
+      params:
+        kernel: rbf
+        C: 1.0
+        epsilon: 0.1
+        gamma: scale
+        cache_size: 2048
+    lstm:
+      enabled: true
+      params:
+        seq_len:
+          daily: 14
+          hourly: 24
+        hidden_size: 64
+        num_layers: 1
+        dropout: 0.1
+        learning_rate: 0.001
+        weight_decay: 0.0
+        batch_size: 256
+        max_epochs: 30
+        patience: 5
+        random_state: 42
+    gru:
+      enabled: true
+      params:
+        seq_len:
+          daily: 14
+          hourly: 24
+        hidden_size: 64
+        num_layers: 1
+        dropout: 0.1
+        learning_rate: 0.001
+        weight_decay: 0.0
+        batch_size: 256
+        max_epochs: 30
+        patience: 5
+        gradient_clip: 1.0
+        random_state: 42
+explainability:
+  enabled: true
+  feature_sets:
+  - all
+  - exogenous
+  split: test
+  max_rows: 5000
+  top_features: 15
+  dependence_plots: 4
+  by_road_type: true
+  road_type_split: train
+  waterfalls: true
+  interaction_rows: 1000

@@ -8,8 +8,10 @@ __pycache__/
 data/raw/speed_zones/
 data/raw.zip
 data/processed/
+data/processed_sensitivity/
 data/processed_pre_restructure/
 
-# fitted model files can be large; everything else in results/ is tracked
-results/saved_models/
-results/
+# working/ = everything the pipeline passes between stages + the last run's
+# full record (rebuilt every run, fitted models are large). results/ -- the
+# ~50 curated files the report is written from -- IS tracked.
+working/

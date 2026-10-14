@@ -1,4 +1,4 @@
-# Hyperparameter tuning config -- read by the scripts in scripts/tuning/
+# Hyperparameter tuning config -- read by the scripts in models/tuning/
 # (tune_ridge.py, tune_decision_tree.py, tune_random_forest.py, tune_lstm.py,
 # tune_gru.py, tune_xgboost.py, tune_svr.py): the `tune` stage of
 # run_pipeline.py. One section per model below; add a new model by adding a
@@ -7,7 +7,7 @@
 # Shared settings at the top apply to both models; each model's own
 # section can override any of them (e.g. add `n_trials: 30` under svr:).
 #
-# How candidates are picked (scripts/tuning/common.py): baseline_params first,
+# How candidates are picked (models/tuning/common.py): baseline_params first,
 # then every required_candidates entry, then random draws from
 # search_space, de-duplicated and cut to n_trials. The winner is chosen on
 # `split` (val) only; test is scored once afterwards, never tuned on.
@@ -115,10 +115,11 @@ lstm:
 # ---------------------------------------------------------------------------
 gru:
   enabled: true
-  grains: [hourly]
+  grains: [daily, hourly]
   n_trials: 10
   fixed_params: {random_state: 42}
   window_lengths:
+    daily: {short: 7, medium: 14, long: 28}
     hourly: {short: 12, medium: 24, long: 48}
   baseline_params: {window: medium, hidden_size: 64, num_layers: 1, dropout: 0.1, learning_rate: 0.001, batch_size: 256, weight_decay: 0.0}
   required_candidates:

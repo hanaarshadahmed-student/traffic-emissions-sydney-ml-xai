@@ -1,0 +1,7 @@
+grain,station_id,station,reason,matched_aq_site,rows_dropped
+daily,6149,"6149 Newell Hwy, Tomingley",no NO2 coverage at matched AQ site,ORANGE (no NO2),642
+daily,6141,"6141 Newell Hwy, Forbes",no NO2 coverage at matched AQ site,ORANGE (no NO2),150
+daily,6105,"6105 Great Western Hwy, Meadow Flat",no NO2 coverage at matched AQ site,BATHURST (no NO2 sensor),712
+daily,6116,"6116 Pacific Hwy, Wardell",no NO2 coverage at matched AQ site,LISMORE (no continuous NO2),169
+daily,6124,"6124 Macleay Valley Way, South Kempsey",PORT MACQUARIE AQ site: >3x year-on-year NO2 shift unrelated to traffic; 36.9 km from monitor,PORT MACQUARIE,682
+daily,6119-PR,"6119-PR Pacific Hwy, Nabiac",PORT MACQUARIE AQ site: >3x year-on-year NO2 shift unrelated to traffic; 87.3 km from monitor,PORT MACQUARIE,678

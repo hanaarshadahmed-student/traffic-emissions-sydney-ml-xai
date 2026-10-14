@@ -1,0 +1,13 @@
+grain,part,mean_abs_shap_pphm,share_of_total,n_features,top_feature,share_of_traffic
+daily,Traffic x weather (e.g. traffic / wind),0.1002648047870025,0.1341968758497387,3,traffic_dispersion_proxy,0.3784656621428008
+daily,Total volume,0.056550516729203,0.0756885991982017,18,traffic_volume_total_lag_14d,0.2134590378338802
+daily,Traffic x time,0.0512244328856468,0.0685600386932492,2,traffic_total_x_working_day,0.1933548761316584
+daily,Heavy vehicles,0.0307813209365122,0.0411984751699492,10,traffic_heavy_x_working_day,0.1161890559166312
+daily,Direction of flow,0.0193040454905712,0.0258370087394723,6,direction_share_northbound,0.0728662303202418
+daily,Unexpected traffic,0.0067993223010489,0.0091003796105724,3,traffic_total_unexpected,0.0256651376547874
+hourly,Traffic x weather (e.g. traffic / wind),0.1314329521992476,0.1041781336534768,4,traffic_dispersion_proxy,0.4210569225491107
+hourly,Total volume,0.060944724379965,0.0483068184374531,19,traffic_volume_total_rolling_168h_std,0.195241738572001
+hourly,Traffic x time,0.0525115362252108,0.0416223947249818,4,traffic_total_x_working_day,0.1682252849939408
+hourly,Heavy vehicles,0.0336794364411616,0.0266954430699115,13,heavy_vehicle_share,0.1078950112876265
+hourly,Direction of flow,0.020160023443168,0.0159795062063494,7,direction_share_northbound,0.0645843929354182
+hourly,Unexpected traffic,0.0134214076460921,0.0106382553258299,3,traffic_total_unexpected,0.0429966496619026

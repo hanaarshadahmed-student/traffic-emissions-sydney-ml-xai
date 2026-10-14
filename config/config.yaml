@@ -12,28 +12,33 @@
 # pipeline -- which stage(s) run_pipeline.py runs
 # ---------------------------------------------------------------------------
 #   all         every stage in order: ingest -> clean -> preprocess ->
-#               features -> split -> train -> (tune) -> evaluate.
-#               Empties data/processed/ first so a run never mixes with a
-#               stale one. results/ is kept (results.json is a cross-run log).
+#               features -> split -> train -> (tune) -> evaluate -> explain
+#               (-> experiments, if run_experiments / --experiments).
+#               Empties data/processed/ and working/ first so a run never
+#               mixes with a stale one. A complete run (tuning + experiments)
+#               then rebuilds results/ -- the curated files the report uses.
 #   <stage>     just that one stage, reusing what's already on disk:
-#               ingest | clean | preprocess | features | split | train | tune | evaluate | explain
+#               ingest | clean | preprocess | features | split | train | tune | evaluate | explain | experiments
 #
 # `--stage <name>` on the command line overrides this for a one-off.
 pipeline:
   stage: all
-  run_tuning: true    # `stage: all` includes the (slow) tune stage; --no-tune skips it
+  run_tuning: true        # `stage: all` includes the (slow) tune stage; --no-tune skips it
+  run_experiments: false  # true (or --experiments) also runs experiments/ after the main
+                          # pipeline: error analysis, leave-one-station-out, ablation,
+                          # public-holiday check (a few minutes)
   jobs: auto          # models trained at the same time: a number, or auto =
                       # one per 4 CPU cores (max 4). 1 = one at a time.
-  save_run: true      # save results + this config + log to results/runs/<run_id>/
+  save_run: true      # save results + this config + log to working/runs/<run_id>/
                       # whenever train/tune/evaluate runs (see scripts/run_record.py)
 
 # ---------------------------------------------------------------------------
 # data -- station exclusions applied in 02_cleaning.py
 # ---------------------------------------------------------------------------
 # MAIN ANALYSIS:        enabled: true   (the stations below are left out)
-# SENSITIVITY ANALYSIS: enabled: false  (everything kept) -- re-run
-#                       `python run_pipeline.py --stage all` and compare,
-#                       to show the conclusions don't hinge on this choice.
+# SENSITIVITY ANALYSIS: `python run_pipeline.py --sensitivity no_exclusions`
+#                       (see config/sensitivity.yaml) -- shows the conclusions
+#                       don't hinge on this choice.
 #
 # Rule (applied to every AQ site, stated in the report): an AQ site is
 # excluded if its same-quarter NO2 mean changes more than 3-fold
@@ -46,6 +51,11 @@ pipeline:
 # Eisinger & Niemeier 2010). This rule was set after inspecting the
 # data, which is why the sensitivity analysis is reported alongside.
 data:
+  # Negative NO2 readings (about 5% of hours, mostly the Newcastle, Liverpool,
+  # Rozelle and Wallsend monitors) are instrument noise around a true value near zero. Kept by
+  # default (setting them to 0 biases averages upward); see the no2_clipped
+  # sensitivity run in config/sensitivity.yaml.
+  clip_negative_no2: false
   station_exclusions:
     enabled: true
     stations:
@@ -83,11 +93,11 @@ training:
     naive_seasonal_climatology: true   # B2: station's train average for that month (+ hour)
 
   # -------------------------------------------------------------------------
-  # B. ML MODELS -- names must match scripts/models.py; enabled: false skips
+  # B. ML MODELS -- names must match models/models.py; enabled: false skips
   #    one. `grains: [daily]` limits a model to some grains (else: all).
   # -------------------------------------------------------------------------
   models:
-    # 1. Ridge -- linear model; also a diagnostic (see scripts/models.py)
+    # 1. Ridge -- linear model; also a diagnostic (see models/models.py)
     ridge:
       enabled: true
       params:
@@ -130,7 +140,8 @@ training:
         n_jobs: -1
         random_state: 42
 
-    # 5. SVR -- daily only: kernel SVR is far too slow on ~47k hourly rows
+    # 5. SVR -- daily only: kernel SVR scales with rows squared, far too slow
+    #    on ~105k hourly training rows (stated as a limitation in the report)
     svr:
       enabled: true
       grains: [daily]
@@ -142,7 +153,7 @@ training:
         cache_size: 2048
 
     # 6. LSTM -- recurrent neural network over the last `seq_len` time steps
-    #    (scripts/lstm.py; needs PyTorch). Same features and rows as the
+    #    (models/sequence_models.py; needs PyTorch). Same features and rows as the
     #    other models; early-stops on the validation split.
     lstm:
       enabled: true
@@ -158,12 +169,11 @@ training:
         patience: 5          # stop after this many epochs without val improvement
         random_state: 42
 
-    # 7. GRU -- lighter recurrent alternative to LSTM for hourly sequences
+    # 7. GRU -- lighter recurrent alternative to LSTM (both grains)
     gru:
       enabled: true
-      grains: [hourly]
       params:
-        seq_len: {hourly: 24}
+        seq_len: {daily: 14, hourly: 24}
         hidden_size: 64
         num_layers: 1
         dropout: 0.1
@@ -173,11 +183,10 @@ training:
         max_epochs: 30
         patience: 5
         gradient_clip: 1.0
-        num_threads: 1
         random_state: 42
 
 # ---------------------------------------------------------------------------
-# explainability -- SHAP on the XGBoost model (stage 08, results/shap/)
+# explainability -- SHAP on the XGBoost model (stage 08, working/latest/shap/)
 # ---------------------------------------------------------------------------
 # Uses the tuned XGBoost saved by the tune stage (or refits the default one if
 # there isn't one). Runs for the grains in training.grain.
@@ -188,3 +197,10 @@ explainability:
   max_rows: 5000                   # random sample size (more = slower, smoother plots)
   top_features: 15                 # features shown in the summary / bar plots
   dependence_plots: 4              # one effect-vs-value plot for each of the top N features
+  by_road_type: true               # importance per road type (Highway / Major Road / Local Street)
+  road_type_split: train           # train = the only split with 2+ stations per road type
+                                   # (test rows are all Local Street)
+  waterfalls: true                 # SHAP for single predictions: highest-NO2, typical, calm vs
+                                   # windy rush hour (waterfall_<grain>_<set>_<case>.png)
+  interaction_rows: 1000           # rows for SHAP interaction values (0 = skip; cost grows
+                                   # with features^2, so a sample is used)

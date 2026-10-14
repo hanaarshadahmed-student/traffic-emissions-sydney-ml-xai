@@ -1,35 +1,8 @@
 """
-Run records -- a saved copy of every pipeline run's results AND the exact
-setup that produced them, so any result can be traced back and re-run.
+Run records: saves each pipeline run's results together with the exact setup that produced them (config, git commit, package versions, logs) in working/runs/<run_id>/, so any result can be traced back and re-run.
 
-run_pipeline.py calls this automatically (turn off with
-`pipeline.save_run: false` in config.yaml or `--no-save`). Each run gets
-its own folder:
-
-    results/runs/<run_id>/
-        run_info.json     when, which stages, timings, status, git commit,
-                          Python + package versions, raw-data fingerprint
-        config.yaml       the exact config the run used (config.yaml plus
-                          any --grain / --models / --no-tune overrides)
-        tuning.yaml       the tuning config (only if the tune stage ran)
-        scores.json       every results.json row this run wrote
-        manifests/        feature / split manifests, AQ verification,
-                          excluded-station logs (which features, stations,
-                          cutoff dates the models actually saw)
-        outputs/          every results/ file this run created or updated
-                          (per-station scores, tuning, evaluation tables/plots)
-        pipeline.log      the full console output
-
-and one row in results/runs/index.csv, a one-line-per-run overview.
-
-To reproduce a run: check out its git commit (run_info.json), then
-    python run_pipeline.py --config results/runs/<run_id>/config.yaml
-Fitted model files (results/saved_models/) are not copied -- they're
-large and can be rebuilt from the config.
-
-Every row a run writes to results/results.json is also tagged with its
-run_id (via the PIPELINE_RUN_ID environment variable that run_pipeline.py
-sets), so any score in results.json points back to its run folder.
+To reproduce a run: check out its git commit (in run_info.json), then
+    python run_pipeline.py --config working/runs/<run_id>/config.yaml
 """
 
 from __future__ import annotations
@@ -51,19 +24,23 @@ import yaml
 from scripts import paths
 
 RUN_ID_ENV = "PIPELINE_RUN_ID"
-RUNS_DIR = paths.RESULTS_DIR / "runs"
+RUNS_DIR = paths.RUNS_DIR
 INDEX_PATH = RUNS_DIR / "index.csv"
 
 PACKAGES = ["pandas", "numpy", "scikit-learn", "xgboost", "torch", "scipy", "holidays",
             "python-calamine", "pyshp", "pyyaml", "matplotlib"]
 
-# results/ files that belong to a run's manifests (copied from processed/)
+# processed/ files saved with each run as its manifests
 MANIFEST_FILES = [
     paths.FEATURE_MANIFEST_PATH,
     paths.SPLIT_MANIFEST_PATH,
     paths.PROCESSED_DIR / "aq_site_verification.csv",
     paths.PROCESSED_DIR / "excluded_stations_log_daily.csv",
     paths.PROCESSED_DIR / "excluded_stations_log_hourly.csv",
+    paths.PROCESSED_DIR / "data_quality_daily.csv",
+    paths.PROCESSED_DIR / "data_quality_hourly.csv",
+    paths.PROCESSED_DIR / "missing_data_daily.csv",
+    paths.PROCESSED_DIR / "missing_data_hourly.csv",
 ]
 
 
@@ -74,10 +51,6 @@ def make_run_id(grains: list[str], name: str | None) -> str:
 
 
 def write_effective_config(config: dict, path: Path, overrides: list[str]) -> Path:
-    """The config the run ACTUALLY used (config.yaml plus any command-line
-    overrides such as --grain / --models / --no-tune). Every stage reads this
-    file, and it's what gets saved with the run -- so re-running it with
-    --config reproduces the run exactly."""
     path.parent.mkdir(parents=True, exist_ok=True)
     header = ("# Effective config for this run = config/config.yaml"
               + (f" + command-line overrides: {' '.join(overrides)}" if overrides else "")
@@ -87,12 +60,11 @@ def write_effective_config(config: dict, path: Path, overrides: list[str]) -> Pa
 
 
 def current_run_id() -> str | None:
-    """The run_id set by run_pipeline.py, or None when a script is run on its own."""
     return os.environ.get(RUN_ID_ENV)
 
 
 # ---------------------------------------------------------------------------
-# Environment / provenance
+# Environment 
 # ---------------------------------------------------------------------------
 
 def _git(*args: str) -> str | None:
@@ -113,8 +85,6 @@ def git_info() -> dict:
         "available": True,
         "commit": commit,
         "branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
-        # True = there were uncommitted code changes, so the commit alone
-        # doesn't fully reproduce this run
         "uncommitted_changes": bool(status.strip()),
     }
 
@@ -130,8 +100,6 @@ def package_versions() -> dict:
 
 
 def raw_data_fingerprint() -> dict:
-    """A short hash of every raw input file's name and contents, so you can
-    tell whether two runs used exactly the same data."""
     files = sorted(p for p in paths.RAW_DIR.rglob("*") if p.is_file())
     digest = hashlib.sha256()
     total_bytes = 0
@@ -145,7 +113,6 @@ def raw_data_fingerprint() -> dict:
         "files": len(files),
         "total_mb": round(total_bytes / 1e6, 1),
         "sha256": digest.hexdigest()[:16],
-        # optional inputs change the features, so record whether they were there
         "speed_zones_present": paths.SPEED_ZONES_SHP.exists(),
         "aq_sites_present": paths.AQ_SITES_PATH.exists(),
     }
@@ -188,16 +155,17 @@ def save_run(
         rows = [r for r in json.loads(paths.RESULTS_PATH.read_text()) if r.get("run_id") == run_id]
     (run_dir / "scores.json").write_text(json.dumps(rows, indent=2, default=str))
 
-    # every results/ file created or updated during the run
-    skip = {RUNS_DIR, paths.SAVED_MODELS_DIR}
+    # every working/latest/ and working/experiments/ file created or updated
     copied = 0
     start_ts = started.timestamp()
-    for path in paths.RESULTS_DIR.rglob("*"):
-        if not path.is_file() or any(s in path.parents for s in skip):
+    sources = [p for folder in (paths.LATEST_DIR, paths.EXPERIMENTS_RESULTS_DIR) if folder.exists()
+               for p in folder.rglob("*")]
+    for path in sources:
+        if not path.is_file():
             continue
         if path == paths.RESULTS_PATH or path.stat().st_mtime < start_ts:
             continue
-        target = run_dir / "outputs" / path.relative_to(paths.RESULTS_DIR)
+        target = run_dir / "outputs" / path.relative_to(paths.WORKING_BASE)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, target)
         copied += 1
@@ -246,7 +214,7 @@ def _best(rows: list[dict], grain: str) -> tuple[dict | None, dict | None]:
 
 
 def rebuild_index() -> None:
-    """Rewrite results/runs/index.csv from every saved run folder -- one row
+    """Rewrite working/runs/index.csv from every saved run folder -- one row
     per run, with the best ML model per grain (chosen on validation R2)."""
     rows_out = []
     for run_dir in sorted(p for p in RUNS_DIR.iterdir() if (p / "run_info.json").exists()):

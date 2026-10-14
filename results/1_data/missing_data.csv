@@ -1,0 +1,17 @@
+grain,variable,pct_missing_before_cleaning,pct_missing_after_cleaning,how_handled
+daily,no2_pphm,1.36,0.0,row dropped (02_cleaning.py) -- the target is never filled in
+daily,traffic_volume_total,0.0,0.0,kept as recorded; days/hours with no count are not in the traffic file
+daily,traffic_volume_heavy,0.0,0.0,kept as recorded
+daily,temp_c,0.45,0.33,filled with the train-only median (03_data_preprocessing.py)
+daily,rain_mm,0.08,0.08,filled with the train-only median; monitors without a rain gauge borrow rain from the nearest monitor that has one (01_data_ingestion.py)
+daily,wind_speed_ms,9.19,9.14,"filled with the train-only median + has_wind_data flag; stations with no wind sensor at all get 0 + flag, and traffic/wind uses the typical wind there"
+daily,wind_dir_deg,9.19,9.14,filled with the train-only median + has_wind_data flag
+daily,humidity_pct,8.95,8.89,"carried forward within the station, else 0 + humidity_data_available flag (04_feature_engineering.py)"
+hourly,no2_pphm,8.12,0.0,row dropped (02_cleaning.py) -- the target is never filled in
+hourly,traffic_volume_total,0.0,0.0,kept as recorded; days/hours with no count are not in the traffic file
+hourly,traffic_volume_heavy,0.0,0.0,kept as recorded
+hourly,temp_c,1.01,0.35,filled with the train-only median (03_data_preprocessing.py)
+hourly,rain_mm,0.67,0.2,filled with the train-only median; monitors without a rain gauge borrow rain from the nearest monitor that has one (01_data_ingestion.py)
+hourly,wind_speed_ms,1.16,0.57,"filled with the train-only median + has_wind_data flag; stations with no wind sensor at all get 0 + flag, and traffic/wind uses the typical wind there"
+hourly,wind_dir_deg,1.16,0.57,filled with the train-only median + has_wind_data flag
+hourly,humidity_pct,0.94,0.29,"carried forward within the station, else 0 + humidity_data_available flag (04_feature_engineering.py)"

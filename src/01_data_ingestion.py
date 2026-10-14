@@ -1,51 +1,7 @@
 """
-CO2/NO2 Traffic-Emissions Capstone -- Raw Data Combination Script
-====================================================================
-Builds TWO final datasets from the raw traffic/weather/emissions files:
+Data ingestion: combines the raw traffic, weather and NO2 files into a daily dataset (all stations) and an hourly dataset (only stations with hourly weather and NO2 from a metro AQ site). Also rebuilds the public holiday column and adds speed zone and AQ site checks if those files are present.
 
-  1. DAILY  -- all 15 candidate stations, daily resolution. Uses BOM daily
-     weather for rural stations, so this is the only resolution at which
-     every station can be included on equal footing.
-
-  2. HOURLY -- only stations where BOTH weather AND NO2 come from a metro
-     AQ-network site (genuine hourly data on both sides). Rural/BOM-weather
-     stations are structurally excluded here since BOM only reports daily
-     min/max temp and rainfall, not hourly readings -- there's nothing to
-     build hourly data from for those stations.
-
-Fixes applied vs. the earlier version:
-  - `public_holiday` in the raw TfNSW export is broken (always 0, even on
-    New Year's Day). It's rebuilt here from a real NSW public holiday
-    calendar (the `holidays` package) instead of trusting the raw column.
-
-Station-metadata enrichment added:
-  - `matched_aq_site`/`aq_distance_km` are cross-checked (not overwritten)
-    against the NSW AQ site registry via haversine distance -- see
-    `verify_aq_site_matches()`. Any station whose hardcoded match isn't
-    the true nearest geocoded site is flagged for manual review (usually
-    because the nearest site doesn't measure NO2, which this registry
-    doesn't tell us -- so it's a flag, not an auto-correction).
-  - `posted_speed_kmh`/`speed_zone_type` are pulled from the TfNSW speed
-    zones shapefile via nearest-line matching -- see `match_speed_zones()`.
-    Both are optional: if the AQ site registry or the speed zones
-    shapefile aren't present locally, ingestion still runs, just without
-    those extra columns (a warning is printed either way).
-
-Design principle unchanged: nothing is filtered/dropped here except the
-above structural exclusion for the hourly build. Station-level modeling
-decisions (dropping no-NO2-coverage stations, thin-coverage stations,
-missing target rows) still happen in 02_cleaning.py, not here.
-
-Requires: pandas, python-calamine, holidays, pyshp
-    pip install pandas python-calamine holidays pyshp
-
-Expected folder layout (relative to project root):
-    data/raw/traffic/<station name>.csv
-    data/raw/weather/tmp_table_*_<site>.xls        - metro AQ-site weather
-    data/raw/weather/IDCJAC00{09,10,11}_..._<site>_Data.csv - BOM rural daily weather
-    data/raw/emissions/tmp_table_*_<site>.xls       - metro AQ-site pollutant data
-    data/raw/air_quality/nsw_air_quality_sites.json - optional, enables AQ-site verification
-    data/raw/speed_zones/Speed_Zones.{shp,shx,dbf,prj} - optional, enables posted-speed matching
+Requires: pip install pandas python-calamine holidays pyshp
 """
 
 import pandas as pd
@@ -74,25 +30,9 @@ AQ_VERIFICATION_OUT_PATH = os.path.join(OUT_DIR, "aq_site_verification.csv")
 
 NSW_HOLIDAYS = holidays_lib.Australia(subdiv="NSW", years=range(2023, 2027))
 
-# station registry: every candidate station, its matched weather/emissions source,
-# and metadata about the AQ-site match quality (kept, not used to filter here)
-STATIONS = {
-    "MUB001 - Melbourne Street":    {"lat": -36.003071, "lon": 146.003235, "suburb": "Mulwala",        "lga": "Corowa",           "weather": ("bom", "mulwala"),        "emissions": ("metro", "albury"),        "aq_site": "ALBURY",           "aq_distance_km": 83.2},
-    "6135-PR - M31 Hume Highway":   {"lat": -34.791008, "lon": 148.863480, "suburb": "Bowning",         "lga": "Yass Valley",      "weather": ("metro", "goulburn"),     "emissions": ("metro", "goulburn"),      "aq_site": "GOULBURN",         "aq_distance_km": 78.1},
-    "6149 - Newell Highway":        {"lat": -32.657825, "lon": 148.199264, "suburb": "Tomingley",       "lga": "Narromine",        "weather": ("bom", "tomingley"),      "emissions": None,                        "aq_site": "ORANGE (no NO2)",  "aq_distance_km": 109.2},
-    "6141 - Newell Highway":        {"lat": -33.410191, "lon": 147.969162, "suburb": "Forbes",          "lga": "Forbes",           "weather": ("bom", "forbes"),         "emissions": None,                        "aq_site": "ORANGE (no NO2)",  "aq_distance_km": 106.1},
-    "6105 - Great Western Highway": {"lat": -33.437302, "lon": 149.929047, "suburb": "Meadow Flat",     "lga": "Lithgow",          "weather": ("metro", "bathurst"),     "emissions": None,                        "aq_site": "BATHURST (no NO2 sensor)", "aq_distance_km": 32.7},
-    "6124 - Macleay Valley Way":    {"lat": -31.105118, "lon": 152.831375, "suburb": "South Kempsey",   "lga": "Kempsey",          "weather": ("bom", "kempsey"),        "emissions": ("metro", "port_macquaire"), "aq_site": "PORT MACQUARIE",   "aq_distance_km": 36.9},
-    "6116 - Pacific Highway":       {"lat": -28.952976, "lon": 153.464539, "suburb": "Wardell",         "lga": "Ballina",          "weather": ("bom", "wardell"),        "emissions": None,                        "aq_site": "LISMORE (no continuous NO2)", "aq_distance_km": 23.8},
-    "7212 - Stewart Avenue":        {"lat": -32.926315, "lon": 151.758545, "suburb": "Newcastle West",  "lga": "Newcastle",        "weather": ("metro", "newcastle"),    "emissions": ("metro", "newcastle"),     "aq_site": "NEWCASTLE",        "aq_distance_km": 0.2},
-    "7211 - Lily Lane":             {"lat": -32.940571, "lon": 151.713120, "suburb": "Adamstown",       "lga": "Newcastle",        "weather": ("metro", "newcastle"),    "emissions": ("metro", "newcastle"),     "aq_site": "NEWCASTLE",        "aq_distance_km": 4.5},
-    "6119-PR - Pacific Highway":    {"lat": -32.088028, "lon": 152.405975, "suburb": "Nabiac",          "lga": "Greater Taree",    "weather": ("bom", "nabiac"),         "emissions": ("metro", "port_macquaire"), "aq_site": "PORT MACQUARIE",   "aq_distance_km": 87.3},
-    "7216 - Gladstone Avenue":      {"lat": -34.425961, "lon": 150.887421, "suburb": "Wollongong",      "lga": "Wollongong",       "weather": ("metro", "wollongong"),   "emissions": ("metro", "wollongong"),    "aq_site": "WOLLONGONG",       "aq_distance_km": 0.6},
-    "6109 - M23 Federal Highway":   {"lat": -34.820808, "lon": 149.599777, "suburb": "Yarra",           "lga": "Goulburn Mulwaree","weather": ("metro", "goulburn"),     "emissions": ("metro", "goulburn"),      "aq_site": "GOULBURN",         "aq_distance_km": 13.0},
-    "10011 - New South Head Road":  {"lat": -33.876652, "lon": 151.230606, "suburb": "Edgecliff",       "lga": "Woollahra",        "weather": ("metro", "randwick"),     "emissions": ("metro", "cook_phillip"),  "aq_site": "COOK AND PHILLIP", "aq_distance_km": 1.8},
-    "100001 - Cambridge Street":    {"lat": -33.878181, "lon": 150.924942, "suburb": "Canley Heights",  "lga": "Fairfield",        "weather": ("metro", "liverpool"),    "emissions": ("metro", "liverpool"),     "aq_site": "LIVERPOOL",        "aq_distance_km": 4.8},
-    "6178-PR - Picton Road":        {"lat": -34.372967, "lon": 150.829529, "suburb": "Cordeaux",        "lga": "Wollongong",       "weather": ("metro", "kembla_grange"),"emissions": ("metro", "wollongong"),    "aq_site": "WOLLONGONG",       "aq_distance_km": 8.2},
-}
+# station registry (ids, locations, matched weather/emissions files, AQ monitor):
+# defined once in scripts/stations.py -- add or edit stations there
+from scripts.stations import STATIONS  # noqa: E402
 
 
 def find_metro_file(directory, keyword, ext="xls"):
@@ -108,8 +48,6 @@ def find_metro_file(directory, keyword, ext="xls"):
 
 
 def read_metro_xls(path):
-    """Read the AQ-portal .xls export directly. Non-standard file, xlrd/openpyxl
-    can't open it -- python-calamine handles it fine."""
     return pd.read_excel(path, engine="calamine", skiprows=2)
 
 
@@ -118,7 +56,7 @@ def real_public_holiday(dates):
 
 
 # ---------------------------------------------------------------------------
-# STATION METADATA ENRICHMENT -- AQ-site verification (flag only, no overwrite)
+# STATION METADATA ENRICHMENT 
 # ---------------------------------------------------------------------------
 
 def _haversine_km(lat1, lon1, lat2, lon2):
@@ -131,22 +69,12 @@ def _haversine_km(lat1, lon1, lat2, lon2):
 
 
 def _same_aq_site(hardcoded: str, nearest: str) -> bool:
-    """True if the registry's nearest site is the hardcoded site, allowing
-    for registry label variants -- e.g. hardcoded "LIVERPOOL" vs registry
-    "LIVERPOOL SWAQS" (0.2km apart, same physical site). The old check only
-    tested nearest-in-hardcoded, so that pair was wrongly flagged REVIEW
-    and station 100001 was down-weighted to 0.5 in training."""
     hard = hardcoded.upper().split(" (")[0].strip()
     near = nearest.upper().strip()
     return near in hard or hard in near
 
 
 def verify_aq_site_matches(stations, sites_path=AQ_SITES_PATH):
-    """Cross-check each station's hardcoded aq_site/aq_distance_km against
-    the true nearest geocoded AQ site (haversine). Does NOT correct
-    STATIONS -- NO2 availability per site isn't in this registry, so the
-    hardcoded (farther) site may still be the deliberate, correct choice.
-    Returns None if the registry file isn't present (feature is optional)."""
     if not os.path.exists(sites_path):
         print(f"  [AQ verification] SKIPPED -- '{sites_path}' not found.")
         return None
@@ -185,10 +113,10 @@ def verify_aq_site_matches(stations, sites_path=AQ_SITES_PATH):
 
 
 # ---------------------------------------------------------------------------
-# STATION METADATA ENRICHMENT -- posted speed limit (speed zones shapefile)
+# STATION METADATA ENRICHMENT
 # ---------------------------------------------------------------------------
 
-_EARTH_R = 6378137.0  # matches Speed_Zones.prj (WGS_1984_Web_Mercator_Auxiliary_Sphere)
+_EARTH_R = 6378137.0 
 
 
 def _lonlat_to_webmercator(lon, lat):
@@ -206,10 +134,6 @@ def _point_seg_dist(px, py, ax, ay, bx, by):
 
 
 def match_speed_zones(stations, shp_path=SPEED_ZONES_SHP, search_radius_m=500):
-    """One pass through the (447k-record) shapefile, checked against every
-    station's bbox at once -- looping stations on the outside would rescan
-    the full file per station instead. Returns {} if the shapefile isn't
-    present locally (feature is optional)."""
     if not os.path.exists(shp_path):
         print(f"  [Speed zones] SKIPPED -- '{shp_path}' not found.")
         return {}
@@ -252,8 +176,6 @@ def match_speed_zones(stations, shp_path=SPEED_ZONES_SHP, search_radius_m=500):
 
 
 def _attach_station_metadata(merged, station_id, station_file, cfg, aq_verification, speed_zone_info):
-    """Shared metadata-attach step used by both build_daily() and
-    build_hourly() -- static per-station attributes, not per-row logic."""
     merged["station_id"] = station_id
     merged["station_name"] = station_file
     merged["station_lat"] = cfg["lat"]
@@ -322,6 +244,16 @@ def load_metro_weather_daily(path):
     return daily
 
 
+def add_borrowed_rain(weather, cfg, loader, keys):
+    source = cfg.get("rain_from")
+    if not source or ("rain_mm" in weather.columns and weather["rain_mm"].notna().any()):
+        return weather
+    rain = loader(find_metro_file(METRO_WEATHER_DIR, source))[keys + ["rain_mm"]]
+    weather = weather.drop(columns=["rain_mm"], errors="ignore").merge(rain, on=keys, how="left")
+    weather["rain_source"] = source
+    return weather
+
+
 def load_bom_weather_daily(site):
     files = glob.glob(f"{BOM_DIR}/IDCJAC*_{site}_Data.csv")
     dfs = []
@@ -376,6 +308,8 @@ def build_daily(aq_verification=None, speed_zone_info=None):
         wtype, wname = cfg["weather"]
         weather = (load_metro_weather_daily(find_metro_file(METRO_WEATHER_DIR, wname))
                    if wtype == "metro" else load_bom_weather_daily(wname))
+        if wtype == "metro":
+            weather = add_borrowed_rain(weather, cfg, load_metro_weather_daily, ["date"])
 
         merged = traffic.merge(weather, on="date", how="left")
 
@@ -503,6 +437,7 @@ def build_hourly(aq_verification=None, speed_zone_info=None):
 
         _, wname = cfg["weather"]
         weather = load_metro_weather_hourly(find_metro_file(METRO_WEATHER_DIR, wname))
+        weather = add_borrowed_rain(weather, cfg, load_metro_weather_hourly, ["date", "hour_ending"])
 
         _, ename = cfg["emissions"]
         emissions = load_metro_emissions_hourly(find_metro_file(METRO_EMISSIONS_DIR, ename))
@@ -540,7 +475,7 @@ if __name__ == "__main__":
     aq_verification = verify_aq_site_matches(STATIONS)
     speed_zone_info = match_speed_zones(STATIONS)
 
-    print("\n=== Building DAILY dataset (all 15 candidate stations) ===")
+    print(f"\n=== Building DAILY dataset (all {len(STATIONS)} candidate stations) ===")
     build_daily(aq_verification, speed_zone_info)
     print("\n=== Building HOURLY dataset (metro-only stations) ===")
     build_hourly(aq_verification, speed_zone_info)

@@ -1,0 +1,22 @@
+station_id,station,road,suburb,road_type,no2_monitor,monitor_distance_km,weather_source,rain_from,excluded_reason,daily_train_rows,daily_val_rows,daily_test_rows,hourly_train_rows,hourly_val_rows,hourly_test_rows,role
+MUB001,"MUB001 Melbourne St, Mulwala",Melbourne Street,Mulwala,Local Street,ALBURY,83.2,bom: mulwala,,,445,77,123,0,0,0,train + test
+6135-PR,"6135-PR M31 Hume Hwy, Bowning",M31 Hume Highway,Bowning,Highway,GOULBURN,78.1,metro: goulburn,,,137,0,0,3138,0,0,train only (record ends before the test period)
+6149,"6149 Newell Hwy, Tomingley",Newell Highway,Tomingley,Highway,ORANGE (no NO2),109.2,bom: tomingley,,no NO2 coverage at matched AQ site,0,0,0,0,0,0,excluded
+6141,"6141 Newell Hwy, Forbes",Newell Highway,Forbes,Highway,ORANGE (no NO2),106.1,bom: forbes,,no NO2 coverage at matched AQ site,0,0,0,0,0,0,excluded
+6105,"6105 Great Western Hwy, Meadow Flat",Great Western Highway,Meadow Flat,Highway,BATHURST (no NO2 sensor),32.7,metro: bathurst,,no NO2 coverage at matched AQ site,0,0,0,0,0,0,excluded
+6124,"6124 Macleay Valley Way, South Kempsey",Macleay Valley Way,South Kempsey,Major Road,PORT MACQUARIE,36.9,bom: kempsey,,PORT MACQUARIE AQ site: >3x year-on-year NO2 shift unrelated to traffic; 36.9 km from monitor,0,0,0,0,0,0,excluded
+6116,"6116 Pacific Hwy, Wardell",Pacific Highway,Wardell,Highway,LISMORE (no continuous NO2),23.8,bom: wardell,,no NO2 coverage at matched AQ site,0,0,0,0,0,0,excluded
+7212,"7212 Stewart Ave, Newcastle West",Stewart Avenue,Newcastle West,Local Street,NEWCASTLE,0.2,metro: newcastle,,,413,112,69,8873,2511,1628,train + test
+7211,"7211 Lily Ln, Adamstown",Lily Lane,Adamstown,Local Street,NEWCASTLE,4.5,metro: newcastle,,,116,0,0,2392,0,0,train only (record ends before the test period)
+6119-PR,"6119-PR Pacific Hwy, Nabiac",Pacific Highway,Nabiac,Highway,PORT MACQUARIE,87.3,bom: nabiac,,PORT MACQUARIE AQ site: >3x year-on-year NO2 shift unrelated to traffic; 87.3 km from monitor,0,0,0,0,0,0,excluded
+7216,"7216 Gladstone Ave, Wollongong",Gladstone Avenue,Wollongong,Local Street,WOLLONGONG,0.6,metro: wollongong,,,387,116,104,8792,2545,2448,train + test
+6109,"6109 M23 Federal Hwy, Yarra",M23 Federal Highway,Yarra,Highway,GOULBURN,13.0,metro: goulburn,,,410,111,120,9473,2476,2842,train + test
+10011,"10011 New South Head Rd, Edgecliff",New South Head Road,Edgecliff,Major Road,COOK AND PHILLIP,1.8,metro: randwick,,,402,0,0,9051,0,0,train only (record ends before the test period)
+100001,"100001 Cambridge St, Canley Heights",Cambridge Street,Canley Heights,Local Street,LIVERPOOL,4.8,metro: liverpool,,,465,116,123,10476,2545,2850,train + test
+6178-PR,"6178-PR Picton Rd, Cordeaux",Picton Road,Cordeaux,Major Road,WOLLONGONG,8.2,metro: kembla_grange,,,60,0,0,1343,0,0,train only (record ends before the test period)
+7163,"7163 Victoria Rd, Rozelle",Victoria Road,Rozelle,Major Road,ROZELLE,0.75,metro: rozelle,,,426,95,123,9779,2049,2786,train + test
+21229,"21229 Military Rd, Neutral Bay",Military Road,Neutral Bay,Major Road,CAMMERAY,0.33,metro: cammeray,,,121,97,0,2837,2174,0,train only (record ends before the test period)
+50240,"50240 Briens Rd, Northmead",Briens Road,Northmead,Major Road,PARRAMATTA NORTH,1.0,metro: parramatta_north,,,459,119,111,9976,2670,2573,train + test
+7289,"7289 Thomas St, Wallsend",Thomas Street,Wallsend,Local Street,WALLSEND,1.3,metro: wallsend,,,422,116,123,9587,2603,2873,train + test
+24223,"24223 Canterbury Rd, Canterbury",Canterbury Road,Canterbury,Major Road,EARLWOOD,1.78,metro: earlwood,rozelle,,443,31,94,9083,549,1899,train + test
+7123-PR,"7123-PR Pages Rd, St Marys",Pages Road,St Marys,Major Road,ST MARYS,2.84,metro: st_marys,parramatta_north,,451,117,122,10417,2495,2871,train + test

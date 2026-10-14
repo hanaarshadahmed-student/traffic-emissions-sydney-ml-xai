@@ -1,36 +1,9 @@
 """
-CO2/NO2 Traffic-Emissions Capstone -- Train/Val/Test Split + Scaling
+Train/val/test split: splits the daily and hourly features by date (one global cutoff, not random, so no future data leaks into training) and scales features using the train split only.
 
-Splits features_daily.csv / features_hourly.csv into train/val/test and
-fits feature scaling -- the step between feature engineering and modeling.
-
-Two choices here matter more than they look:
-
-1. The split is CHRONOLOGICAL, not random, with ONE GLOBAL CUTOFF DATE
-   for every station (see split_utils.py for why it is no longer per
-   station -- stations sharing an AQ site leaked targets across splits). Random
-   splitting would leak information: a test-set row's lag/rolling features
-   are computed from timestamps that could land in the training set,
-   letting the model implicitly see the future. A consequence of the
-   global cutoff: stations whose data ends early sit entirely in train,
-   so val/test evaluate the long-running stations (see data/Data.md).
-
-2. The scaler is fit on the TRAIN split ONLY, then applied unchanged to
-   val/test. Fitting on the full dataset first would leak test-set
-   statistics (mean/std) into training. Binary/one-hot columns (season,
-   road bucket, station dummies, availability flags, ...) are left
-   unscaled -- scaling a 0/1 flag doesn't help any of the baseline models
-   and would make the coefficients harder to read for the linear/SVR
-   models downstream.
-
-Input:  data/processed/features_daily.csv
-        data/processed/features_hourly.csv
-        data/processed/feature_manifest.json
-Output: data/processed/splits/{grain}_train.csv
-        data/processed/splits/{grain}_val.csv
-        data/processed/splits/{grain}_test.csv
-        data/processed/splits/{grain}_scaler.joblib
-        data/processed/splits/split_manifest.json
+Usage:
+    python src/05_train_test_split.py
+    python run_pipeline.py --stage split
 """
 
 from __future__ import annotations
@@ -197,11 +170,20 @@ def split_and_scale(grain: str, manifest: dict, prune: bool = True) -> dict:
     joblib.dump(scaler, SPLITS_DIR / f"{grain}_scaler.joblib")
 
     def split_summary(part_df: pd.DataFrame) -> dict:
+        # NO2 level and spread per split. R2 = 1 - error / spread, so a split
+        # with less spread (e.g. a calmer season) gets a LOWER R2 for the
+        # same size of error -- compare these before reading a val -> test
+        # R2 drop as "the model got worse" (check RMSE too).
+        no2 = part_df["no2_pphm"]
         return {
             "rows": int(len(part_df)),
             "stations": int(part_df["station_id"].nunique()),
             "date_min": str(part_df[date_col].min()),
             "date_max": str(part_df[date_col].max()),
+            "no2_mean": round(float(no2.mean()), 4),
+            "no2_sd": round(float(no2.std()), 4),
+            "no2_sd_within_station": round(float(part_df.groupby("station_id")["no2_pphm"].std().mean()), 4),
+            "rows_per_station": {str(k): int(v) for k, v in part_df["station_id"].value_counts().sort_index().items()},
         }
 
     return {
@@ -243,6 +225,9 @@ def main():
             f"test {test['rows']:,} rows ({test['date_min']} to {test['date_max']}) "
             f"-> {grain}_train.csv / {grain}_val.csv / {grain}_test.csv"
         )
+        print("       NO2 spread (sd, pphm): " + ", ".join(
+            f"{name} {summary[name]['no2_sd']:.3f}" for name in ("train", "val", "test"))
+              + "  -- lower spread = lower R2 for the same error")
         print(
             f"       cutoffs: train < {summary['train_end_exclusive'][:10]} <= val < "
             f"{summary['val_end_exclusive'][:10]} <= test"

@@ -1,0 +1,17 @@
+grain,step,description,rows_before,rows_after,rows_removed,stations_after
+daily,0,combined traffic + weather + NO2 data (all candidate stations),10511,10511,0,21
+daily,1,"drop stations whose monitor has no NO2 (6149, 6141, 6105, 6116)",10511,8838,1673,17
+daily,1b,"drop stations excluded for data quality (6124, 6119-PR)",8838,7478,1360,15
+daily,2,drop rows with negative traffic counts,7478,7478,0,15
+daily,3,temperatures outside -10..50 C set to missing (0 values; rows kept),7478,7478,0,15
+daily,4,drop rows with no NO2 reading (the target is never filled in),7478,7376,102,15
+daily,4b,"negative NO2 readings kept (158 values, 2.1% of rows)",7376,7376,0,15
+daily,6,drop duplicate station + time rows,7376,7376,0,15
+hourly,0,combined traffic + weather + NO2 data (all candidate stations),163920,163920,0,14
+hourly,1,drop stations whose monitor has no NO2 (none),163920,163920,0,14
+hourly,1b,drop stations excluded for data quality (none),163920,163920,0,14
+hourly,2,drop rows with negative traffic counts,163920,163920,0,14
+hourly,3,temperatures outside -10..50 C set to missing (0 values; rows kept),163920,163920,0,14
+hourly,4,drop rows with no NO2 reading (the target is never filled in),163920,150604,13316,14
+hourly,4b,"negative NO2 readings kept (5947 values, 3.9% of rows)",150604,150604,0,14
+hourly,6,drop duplicate station + time rows,150604,150604,0,14
