@@ -1,37 +1,9 @@
 """
-CO2/NO2 Traffic-Emissions Capstone -- Stage 07: Evaluation / method comparison
-
-Reads results/latest/results.json (nothing is retrained, so it's instant) and
-compares every method, grouped by type:
-
-  Baseline methods (not ML -- the bar to beat)
-      B1 Persistence, B2 Seasonal climatology
-  ML models
-      1 Ridge, 2 Decision tree, 3 Random forest, 4 XGBoost, 5 SVR, 6 LSTM,
-      7 GRU
-      (each as "default" = config.yaml settings, and "tuned" once tuned)
-
-What it prints (per grain):
-  SUMMARY   one row per method: R2 on validation and test for each feature
-            set, plus the MEDIAN of the per-station test R2s (stations with
-            under 30 test rows left out). Choose between methods on
-            VALIDATION; report TEST once.
-  --detail  the full table, one block per method: RMSE / MAE / R2 on
-            train, val and test for every feature set, plus the gaps
-            (train >> val = overfitting; val ~= test = val was a fair
-            stand-in for unseen data).
-
-Outputs (results/latest/evaluation/):
-  summary_<grain>.csv / .png        the summary table + chart (start here)
-  train_val_test_<grain>.csv / .png the full detail table + chart
-  stage_delta_<grain>.csv           tuned minus default, when tuning has run
-  all_results.csv                   every results.json row, flattened
+Evaluation: compares every baseline and ML model (default and tuned) from results.json and saves summary tables and charts. Nothing is retrained.
 
 Usage:
     python src/07_evaluation.py
-    python src/07_evaluation.py --detail                 # + full tables
-    python src/07_evaluation.py --grain daily --model ridge lstm
-    python src/07_evaluation.py --trials                 # + every tuning trial
+    python src/07_evaluation.py --detail      # full train/val/test tables
 """
 
 from __future__ import annotations
@@ -136,7 +108,7 @@ def _feature_sets(df: pd.DataFrame) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def station_median_r2(model: str, stage: str, grain: str, feature_set: str, split: str = "test") -> float:
-    """Median of the per-station R2 values (results/latest/per_station/),
+    """Median of the per-station R2 values (working/latest/per_station/),
     leaving out stations with too few rows (R2 = NaN there, see
     evaluate_per_station). The pooled R2 also rewards getting the
     DIFFERENCES between stations right; the median shows how well a typical

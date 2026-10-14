@@ -1,13 +1,9 @@
-"""Tune Ridge regression (alpha) on the shared scaled tabular dataset.
+"""
+Tune Ridge: tries each alpha (how strongly coefficients are shrunk) and picks the best on the validation split.
 
-Ridge has a single setting, alpha, that shrinks the coefficients: small alpha
-is close to ordinary linear regression, large alpha gives a simpler model that
-overfits less. Every alpha listed in config/tuning.yaml is tried; the winner
-is chosen on the validation split only, and the test split is scored once
-afterwards (never tuned on).
-
-Run on its own:   python models/tuning/tune_ridge.py
-Or as part of:    python run_pipeline.py --stage tune --models ridge
+Usage:
+    python models/tuning/tune_ridge.py
+    python run_pipeline.py --stage tune --models ridge
 """
 
 from __future__ import annotations

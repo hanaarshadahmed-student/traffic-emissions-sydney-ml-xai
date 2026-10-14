@@ -1,17 +1,9 @@
-"""Tune the decision tree on the shared scaled tabular dataset.
+"""
+Tune decision tree: searches tree settings that limit overfitting (depth, leaf size, pruning) and picks the best on the validation split.
 
-A single tree overfits easily: left alone it memorises the training rows. The
-settings searched here all limit that --
-  max_depth          how many questions deep the tree may go
-  min_samples_leaf   the fewest rows allowed in a final leaf
-  min_samples_split  the fewest rows needed to split a branch further
-  ccp_alpha          prunes branches that add little (0 = no pruning)
-The first candidates tried are the config.yaml settings, then a few hand-picked
-ones, then random draws from the search space in config/tuning.yaml. The winner
-is chosen on the validation split only; test is scored once afterwards.
-
-Run on its own:   python models/tuning/tune_decision_tree.py
-Or as part of:    python run_pipeline.py --stage tune --models decision_tree
+Usage:
+    python models/tuning/tune_decision_tree.py
+    python run_pipeline.py --stage tune --models decision_tree
 """
 
 from __future__ import annotations

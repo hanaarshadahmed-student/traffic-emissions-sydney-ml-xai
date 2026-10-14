@@ -1,20 +1,7 @@
 """
-Station list -- the ONE place stations are defined.
+Stations: the one place stations are defined (traffic file, weather and NO2 sources, nearest AQ monitor), plus station_label() for readable names in tables and charts.
 
-Each key is "<station id> - <road name>" and must match the traffic file
-name: data/raw/traffic/<key>.csv. To add a station, add a line here and put
-its traffic, weather and emissions files in data/raw/ (see README).
-
-  weather / emissions   ("metro", <file keyword>) = AQ-network .xls file
-                        ("bom", <file keyword>)   = BOM daily .csv files
-                        None                      = no NO2 data for this station
-  aq_site               the air-quality monitor the NO2 comes from
-  aq_distance_km        distance from the traffic counter to that monitor
-  rain_from             (optional) weather-file keyword to take rainfall from,
-                        for monitors that don't record rain themselves
-
-station_label() turns an id into a readable name for tables and charts,
-e.g. "7212" -> "7212 Stewart Ave, Newcastle West".
+To add a station, add a line here and put its traffic, weather and emissions files in data/raw/ (see README).
 """
 
 from __future__ import annotations

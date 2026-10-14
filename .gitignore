@@ -11,5 +11,7 @@ data/processed/
 data/processed_sensitivity/
 data/processed_pre_restructure/
 
-# results are rebuilt by the pipeline (and fitted models are large)
-results/
+# working/ = everything the pipeline passes between stages + the last run's
+# full record (rebuilt every run, fitted models are large). results/ -- the
+# ~50 curated files the report is written from -- IS tracked.
+working/

@@ -1,23 +1,6 @@
 """
-CO2/NO2 Traffic-Emissions Capstone -- Shared modeling utilities
-
-06_run_models.py and the tuning scripts (models/tuning/) import from here
-to load data, score predictions, and save results -- so every model in
-models/models.py trains and is evaluated the exact same way.
-
-Usage:
-
-    from model_utils import load_split, get_feature_columns, evaluate, save_result
-
-    X_train, y_train, w_train = load_split("daily", "train", feature_set="exogenous", with_weight=True)
-    X_val, y_val = load_split("daily", "val", feature_set="exogenous")
-
-    model = ...  # fit on X_train, y_train
-    fit_with_optional_weight(model, X_train, y_train, w_train)
-    y_pred = model.predict(X_val)
-
-    metrics = evaluate(y_val, y_pred)
-    save_result("random_forest", "daily", "exogenous", metrics)
+Model utils: shared helpers for loading splits, scoring predictions and saving results, so every model is trained and evaluated the same way. 
+Used by 06_run_models.py and the tuning scripts.
 """
 
 from __future__ import annotations
@@ -50,16 +33,6 @@ def load_manifest() -> dict:
 
 
 def get_feature_columns(grain: str, feature_set: str = "exogenous") -> list[str]:
-    """feature_set is one of:
-    - "exogenous"       -- traffic/weather/calendar/road/station only (no NO2 history)
-    - "autoregressive"  -- only NO2's own lag/rolling features
-    - "all"             -- exogenous + autoregressive combined
-
-    Use "exogenous" for an explanatory model (what external factors drive
-    NO2), "all" for a short-horizon forecasting model. Comparing the same
-    model type across "exogenous" vs "all" is the ablation from the
-    proposal's RQ2.
-    """
     manifest = load_manifest()[grain]
     if feature_set == "exogenous":
         features = manifest["exogenous_features"]
@@ -69,8 +42,6 @@ def get_feature_columns(grain: str, feature_set: str = "exogenous") -> list[str]
         features = manifest["all_candidate_features"]
     else:
         raise ValueError(f"Unknown feature_set: {feature_set!r}")
-    # Drop the near-duplicate / constant features 05_train_test_split.py
-    # pruned on train rows (listed with reasons in split_manifest.json).
     excluded = load_excluded_features(grain)
     return [f for f in features if f not in excluded]
 
@@ -89,22 +60,6 @@ def load_split(
     target: str = DEFAULT_TARGET,
     with_weight: bool = False,
 ):
-    """Load one split (train/val/test) of one grain (daily/hourly) and
-    return (X, y) ready to hand straight to a model's .fit()/.predict().
-
-    Columns are already scaled (continuous features) or left as clean
-    0/1 dummies (categoricals) by 05_train_test_split.py -- nothing
-    further to do here.
-
-    with_weight=True also returns the per-row aq_quality_weight column
-    (0.5 for REVIEW-flagged stations, 1.0 otherwise -- see
-    03_data_preprocessing.py) as a third value, so a noisy/poorly
-    AQ-matched station counts for less during TRAINING. Only pass
-    with_weight=True when loading the train split -- weighting an eval
-    split would score the model on a distorted version of the target
-    population instead of the real one, so evaluate() always sees
-    every row equally regardless of this flag.
-    """
     path = SPLITS_DIR / f"{grain}_{split}.csv"
     if not path.exists():
         raise FileNotFoundError(
@@ -125,12 +80,6 @@ def load_split(
 
 
 def fit_with_optional_weight(model, X, y, sample_weight) -> bool:
-    """Fits `model` with sample_weight if its .fit() accepts that
-    parameter (RandomForest/DecisionTree/Ridge/SVR/XGBoost all do),
-    otherwise falls back to a plain .fit(X, y) so a future model that
-    doesn't support weighting still runs instead of crashing. Returns
-    True if the weight was actually used, so the caller can report it.
-    """
     accepts_weight = "sample_weight" in inspect.signature(model.fit).parameters
     if accepts_weight:
         model.fit(X, y, sample_weight=sample_weight)
@@ -140,10 +89,6 @@ def fit_with_optional_weight(model, X, y, sample_weight) -> bool:
 
 
 def load_station_ids(grain: str, split: str) -> pd.Series:
-    """Station id for each row of the given split, in the same row order
-    load_split() reads for the same (grain, split) -- so the two can be
-    zipped together to break a model's predictions down per station
-    without needing station_id in the model's own feature set."""
     path = SPLITS_DIR / f"{grain}_{split}.csv"
     if not path.exists():
         raise FileNotFoundError(
@@ -152,23 +97,9 @@ def load_station_ids(grain: str, split: str) -> pd.Series:
     return pd.read_csv(path, usecols=["station_id"], dtype={"station_id": str})["station_id"]
 
 
-# per-station R2 is only reported for stations with at least this many rows
 MIN_STATION_ROWS = 30
 
-
 def evaluate_per_station(y_true, y_pred, station_ids: pd.Series) -> pd.DataFrame:
-    """Same RMSE/MAE/R2 as evaluate(), broken down by station -- sorted
-    worst-R2-first. Useful for telling apart "the features genuinely
-    don't generalize" from "one or two short-history stations (e.g.
-    6178-PR at ~60 rows total) are dragging the aggregate score down" --
-    see the ridge note in models/models.py for why that distinction matters.
-
-    Stations with fewer than MIN_STATION_ROWS (30) rows get R2 = NaN
-    rather than a number: R2 on a handful of days is noise, not a real
-    error metric (e.g. Military Rd once had 4 daily test rows), and would be
-    misleading among the real ones or in a median across stations. Their
-    row count, RMSE and MAE are still shown.
-    """
     frame = pd.DataFrame({
         "station_id": np.asarray(station_ids),
         "y_true": np.asarray(y_true, dtype=float),
@@ -191,15 +122,8 @@ def evaluate_per_station(y_true, y_pred, station_ids: pd.Series) -> pd.DataFrame
 
 
 # --- row-by-row predictions --------------------------------------------------
-# evaluate_per_station() already receives every prediction, and every model
-# (baselines, 06_run_models.py and all the tuning scripts) passes its result
-# straight to save_per_station(). So the predictions are parked here, keyed
-# by a small tag on the per-station table, and save_per_station() writes them
-# to results/latest/predictions/ -- no changes needed in any caller. Only a short
-# id goes in .attrs (not the arrays), so pandas can still compare/concat the
-# per-station tables safely.
 _PREDICTION_CACHE: dict[int, pd.DataFrame] = {}
-_PREDICTION_CACHE_MAX = 16  # tables scored but never saved (learning curves) are dropped
+_PREDICTION_CACHE_MAX = 16 
 _prediction_counter = 0
 
 
@@ -207,7 +131,6 @@ def _remember_predictions(per_station: pd.DataFrame, frame: pd.DataFrame) -> Non
     global _prediction_counter
     _prediction_counter += 1
     frame = frame.copy()
-    # position in the split CSV, so rows can be joined back to dates/hours later
     frame.insert(0, "row", np.arange(len(frame)))
     _PREDICTION_CACHE[_prediction_counter] = frame
     per_station.attrs["predictions_id"] = _prediction_counter
@@ -219,17 +142,6 @@ def save_per_station(
     model_name: str, grain: str, feature_set: str, split: str, per_station: pd.DataFrame,
     stage: str = "default",
 ) -> Path:
-    """Writes one run's per-station breakdown to its own CSV (one file
-    per model/grain/feature_set/split, overwritten on rerun) alongside
-    the aggregate results.json, so you can open it directly to see which
-    stations are driving a low aggregate score.
-
-    Also writes the row-by-row predictions behind it to
-    results/latest/predictions/<same name>.csv.gz (columns: row, station_id,
-    y_true, y_pred), used for bootstrap confidence intervals and error
-    analysis. `row` is the row's position in data/processed/splits/
-    <grain>_<split>.csv. Train-split predictions are skipped (large, and
-    not needed for any analysis)."""
     out_dir = paths.PER_STATION_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     name = f"{model_name}_{stage}_{grain}_{feature_set}_{split}"
@@ -244,8 +156,6 @@ def save_per_station(
 
 
 def evaluate(y_true, y_pred, train_seconds: float | None = None) -> dict:
-    """Standard metric set from the proposal's Model Evaluation section:
-    RMSE, MAE, R^2, plus training time when supplied."""
     metrics = {
         "rmse": float(np.sqrt(mean_squared_error(y_true, y_pred))),
         "mae": float(mean_absolute_error(y_true, y_pred)),
@@ -257,21 +167,12 @@ def evaluate(y_true, y_pred, train_seconds: float | None = None) -> dict:
 
 
 def _row_stage(row: dict) -> str:
-    """Stage of a results.json row. Rows written before the `stage` column
-    existed are inferred: the fine-tuning scripts always set tuned=True."""
     stage = row.get("stage") or ("tuned" if row.get("tuned") else "default")
-    # "baseline" was the old name for the untuned stage -- renamed to
-    # "default" so it can't be confused with the naive baseline METHODS
     return "default" if stage == "baseline" else stage
 
 
 @contextlib.contextmanager
 def _results_lock(timeout: float = 120.0):
-    """Only one process at a time may update results.json. Needed when
-    06_run_models.py trains several models in parallel (--jobs): without
-    it two workers could read the file together and one would overwrite
-    the other's rows. A leftover lock from a crashed run is ignored after
-    `timeout` seconds."""
     lock_path = paths.RESULTS_PATH.with_suffix(".json.lock")
     start = time.time()
     while True:
@@ -281,7 +182,7 @@ def _results_lock(timeout: float = 120.0):
             break
         except FileExistsError:
             if time.time() - start > timeout:
-                lock_path.unlink(missing_ok=True)  # stale lock
+                lock_path.unlink(missing_ok=True)
                 continue
             time.sleep(0.05)
     try:
@@ -298,17 +199,6 @@ def save_result(
     split: str = "val",
     stage: str = "default",
 ) -> Path:
-    """Upserts one run's metrics into results/latest/results.json,
-    keyed on (model, stage, grain, feature_set, split).
-
-    `stage` separates a model's untuned run with the config's settings
-    (stage="default", 06_run_models.py)
-    from its tuned run (models/tuning/*), so tuning XGBoost no longer
-    overwrites the XGBoost default row -- both are kept, and
-    07_evaluation.py shows them side by side.
-
-    When run through run_pipeline.py the row also gets a `run_id`, linking
-    it to results/runs/<run_id>/ (config, manifests, log)."""
     paths.RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
     results_path = paths.RESULTS_PATH
     row = {
@@ -319,8 +209,6 @@ def save_result(
         "split": split,
         **metrics,
     }
-    # Tag the row with the pipeline run that wrote it (see scripts/run_record.py),
-    # so every score can be traced back to its saved config.
     run_id = os.environ.get("PIPELINE_RUN_ID")
     if run_id:
         row["run_id"] = run_id
@@ -340,9 +228,6 @@ def save_result(
         results.append(row)
         temp_path = results_path.with_suffix(f".json.tmp{os.getpid()}")
         temp_path.write_text(json.dumps(results, indent=2, default=str))
-        # Windows refuses the swap while another program (VS Code, File
-        # Explorer's preview pane, antivirus) briefly has results.json open,
-        # so retry for a few seconds instead of failing the whole run.
         for attempt in range(40):
             try:
                 os.replace(temp_path, results_path)
@@ -355,14 +240,6 @@ def save_result(
 
 
 class Timer:
-    """Small context manager so a model script can time its own .fit()
-    call without every script re-writing the same three lines.
-
-        with Timer() as t:
-            model.fit(X_train, y_train)
-        metrics = evaluate(y_val, model.predict(X_val), train_seconds=t.seconds)
-    """
-
     def __enter__(self):
         self._start = time.perf_counter()
         return self

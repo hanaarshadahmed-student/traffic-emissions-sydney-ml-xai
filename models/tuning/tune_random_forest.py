@@ -1,22 +1,9 @@
-"""Tune the random forest on the shared scaled tabular dataset.
+"""
+Tune random forest: searches forest settings (number of trees, depth, leaf size, features per split) and picks the best on the validation split.
 
-A random forest averages many decision trees, each trained on a random sample
-of rows and features. The settings searched here (see config/tuning.yaml):
-  n_estimators      how many trees (more = steadier, slower)
-  max_depth         how deep each tree may grow (null = no limit)
-  min_samples_leaf  the fewest rows allowed in a final leaf (bigger = simpler)
-  max_features      share of the features each split may look at (smaller =
-                    more varied trees, and faster)
-The first candidates are the config.yaml settings, then a few hand-picked
-ones, then random draws from the search space. The winner is chosen on the
-validation split only; test is scored once afterwards.
-
-A forest already uses every CPU core while it trains (n_jobs: -1), so the
-candidates are tried one after another. Hourly forests take about a minute
-each, so keep n_trials small for that grain -- tuning is the slow stage.
-
-Run on its own:   python models/tuning/tune_random_forest.py
-Or as part of:    python run_pipeline.py --stage tune --models random_forest
+Usage:
+    python models/tuning/tune_random_forest.py
+    python run_pipeline.py --stage tune --models random_forest
 """
 
 from __future__ import annotations

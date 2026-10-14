@@ -1,5 +1,6 @@
-"""Shared random-search, learning-curve and config utilities for the
-tuning scripts (tune_ridge.py, tune_xgboost.py, tune_svr.py, ...)."""
+"""
+Common: shared helpers for the tuning scripts (random search, learning curves and config loading).
+"""
 
 from __future__ import annotations
 

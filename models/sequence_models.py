@@ -1,35 +1,6 @@
 """
-Recurrent models -- LSTM (ML model #6) and GRU (ML model #7): neural
-networks that look at a short window of recent history instead of a single
-row. Both use the same sequence windows (below); they differ only in the
-recurrent layer (the GRU's is a lighter version of the LSTM's).
-
-How it fits the pipeline
-------------------------
-Models 1-5 see one row at a time: the features at time t (which already
-include hand-made lag/rolling features). The LSTM sees the SAME feature
-columns, but for the last `seq_len` time steps at that station
-(t - seq_len + 1 ... t), and learns its own way of using that history.
-
-  * Same inputs: the feature set's columns from data/processed/splits/,
-    already scaled by 05_train_test_split.py (fit on train only).
-  * Same targets, rows and scoring: one prediction per row of each split,
-    in the split file's row order, scored by 06_run_models.py exactly like
-    every other model.
-  * Missing time steps (gaps in the data, or the start of a station's
-    record) are filled with zeros and flagged by an extra "available"
-    input channel -- the same idea as the `_available` flags on the lag
-    features. Rows are never dropped.
-  * A window may reach back into an earlier split (e.g. a validation row's
-    history comes from the end of train). That's only past INPUTS, never
-    future information, so it's how a real forecast would work.
-  * Early stopping on the validation split (like XGBoost's early stopping),
-    keeping the epoch with the lowest validation loss.
-  * Training uses aq_quality_weight as a per-row loss weight, like the
-    other models' sample_weight.
-
-Settings live in config/config.yaml under training.models.lstm.params and
-training.models.gru.params. Requires PyTorch (`pip install torch`).
+Sequence models: LSTM and GRU, which look at a window of recent time steps at each station instead of a single row, and are scored the same way as every other model. 
+Settings live under training.models.lstm / gru in config.yaml; needs PyTorch.
 """
 
 from __future__ import annotations
@@ -45,8 +16,6 @@ try:
     from torch import nn
 except ImportError as error:  # pragma: no cover - only hit without torch installed
     raise ImportError(
-        "The LSTM / GRU models need PyTorch. Install it with `pip install torch`, "
-        "or set training.models.lstm.enabled: false in config/config.yaml."
     ) from error
 
 TIME_STEP = {"daily": pd.Timedelta(days=1), "hourly": pd.Timedelta(hours=1)}
@@ -58,11 +27,9 @@ TIME_STEP = {"daily": pd.Timedelta(days=1), "hourly": pd.Timedelta(hours=1)}
 
 @dataclass
 class SequenceData:
-    """Every row of train/val/test stacked into one feature matrix, plus,
-    for each row, the positions of its last `seq_len` time steps."""
-    features: torch.Tensor          # (n_rows, n_features) float32
-    windows: torch.Tensor           # (n_rows, seq_len) int64, -1 = step missing
-    split_rows: dict[str, np.ndarray]  # split -> row positions, in split-file order
+    features: torch.Tensor          
+    windows: torch.Tensor           
+    split_rows: dict[str, np.ndarray]  
 
 
 def build_sequences(
@@ -71,8 +38,6 @@ def build_sequences(
     grain: str,
     seq_len: int,
 ) -> SequenceData:
-    """frames: {"train": df, "val": df, "test": df} as read from the split
-    CSVs (each needs station_id, timestamp and the feature columns)."""
     parts, split_rows, offset = [], {}, 0
     for split, frame in frames.items():
         parts.append(frame[["station_id", "timestamp", *feature_columns]])
@@ -88,7 +53,6 @@ def build_sequences(
     step = TIME_STEP[grain]
     windows = np.full((len(combined), seq_len), -1, dtype=np.int64)
     for k in range(seq_len):
-        # column seq_len-1 is the current row, column 0 the oldest step
         wanted = pd.MultiIndex.from_arrays(
             [combined["station_id"].astype(str), combined["timestamp"] - k * step]
         )
@@ -103,8 +67,6 @@ def build_sequences(
 
 
 def _gather(data: SequenceData, rows: np.ndarray) -> torch.Tensor:
-    """(batch, seq_len, n_features + 1): features per step plus an
-    'available' channel; missing steps are all zeros."""
     window = data.windows[torch.as_tensor(rows)]
     available = (window >= 0).unsqueeze(-1).float()
     steps = data.features[window.clamp(min=0)] * available
@@ -130,9 +92,6 @@ class LSTMNetwork(nn.Module):
 
 
 class LSTMRegressor:
-    """Trained by 06_run_models.py through fit_sequences()/predict_sequences()
-    rather than the tabular fit()/predict() models 1-5 use."""
-
     needs_sequences = True
 
     def __init__(
@@ -164,7 +123,6 @@ class LSTMRegressor:
         self.verbose = verbose
 
     def window_length(self, grain: str) -> int:
-        """seq_len may be one number or {daily: 14, hourly: 24}."""
         if isinstance(self.seq_len, dict):
             return int(self.seq_len[grain])
         return int(self.seq_len)
@@ -190,7 +148,7 @@ class LSTMRegressor:
         if self.num_threads:
             torch.set_num_threads(int(self.num_threads))
 
-        # standardise the target with TRAIN statistics (undone in predict)
+        
         self.y_mean_ = float(np.mean(y_train))
         self.y_std_ = float(np.std(y_train)) or 1.0
         y_tr = torch.tensor(((np.asarray(y_train) - self.y_mean_) / self.y_std_), dtype=torch.float32)

@@ -1,60 +1,9 @@
 """
-CO2/NO2 Traffic-Emissions Capstone -- Ablation study
-
-Which parts of the pipeline actually matter? Retrains a model with ONE thing
-removed at a time and measures how much the validation score drops:
-
-  - <family>             every feature in one family removed (Traffic,
-                         Weather, Calendar, Road / station, NO2 history,
-                         Traffic x weather -- see scripts/feature_families.py)
-  - ALL traffic / ALL weather
-                         the family removed TOGETHER with Traffic x weather
-                         (traffic / wind etc.), so no traffic (or weather)
-                         information is left in at all -- the fair test of
-                         "does the model need traffic?"
-  - ALL traffic except unexpected
-                         every traffic feature removed EXCEPT "unexpected
-                         traffic" (traffic minus what is normal for that
-                         station / hour / weekday -- the part the clock can't
-                         predict). Compare with "- ALL traffic": a higher score
-                         means traffic matters beyond time of day (C1)
-  - traffic part: <part> one part of traffic removed (Total volume, Heavy
-                         vehicles, Direction of flow, Traffic x time,
-                         Unexpected traffic -- scripts/feature_families.py) (C2)
-  - ALL traffic + Calendar
-                         traffic AND calendar removed together. Traffic follows
-                         a regular daily / weekly rhythm, so hour-of-day and
-                         weekday features can stand in for it; if removing
-                         traffic alone barely matters but removing both does,
-                         the two are substitutes (the model can't separate them)
-  - no sample weights    REVIEW-flagged stations count fully instead of half
-                         (the aq_quality_weight from 03_data_preprocessing.py)
-  - no feature pruning   the near-duplicate features 05_train_test_split.py
-                         drops (|r| > 0.95 with a kept feature) put back in
-
-A big drop = that part carries information the rest can't replace. A drop
-near 0 = the other features cover for it (or it never helped). A RISE = the
-model is better without it (a sign of overfitting -- relevant for daily data,
-~150 features on ~2,500 rows).
-
-Removing a family is a stronger test than SHAP: SHAP says how much the model
-USES a feature; ablation says whether the model NEEDS it. Correlated families
-(e.g. traffic vs calendar -- rush hour) can each look unimportant here while
-SHAP shares the credit between them.
-
-Scored on validation (the split for decisions); test is shown for reference.
-Models use their config.yaml settings. Nothing here touches results.json.
-
-Outputs (results/experiments/ablation/):
-  ablation_<grain>.csv   every feature set x model x variant: features, val/test R2,
-                         change in val R2 vs the full model
-  ablation_<grain>.png   change in val R2 per variant
+Ablation study: retrains the model with one part removed at a time (a feature family, sample weights, or feature pruning) and measures how much the validation score drops, to show which parts of the pipeline actually matter.
 
 Usage:
-    python experiments/03_ablation.py                          # both grains, ridge + xgboost
+    python experiments/03_ablation.py
     python experiments/03_ablation.py --grain daily --models xgboost random_forest
-    python experiments/03_ablation.py --feature-set exogenous
-Run AFTER the pipeline (needs data/processed/splits/).
 """
 
 from __future__ import annotations
@@ -92,29 +41,19 @@ def variants(grain: str, feature_set: str) -> list[tuple[str, list[str], bool]]:
     out = [("full model", features, True)]
     groups = group_features(features)
     removals = dict(groups)
-    # "Traffic" alone isn't a clean test while traffic / wind (Traffic x weather)
-    # stays in -- so also remove each together with the mixed family
     for main in ("Traffic", "Weather"):
         if main in groups and "Traffic x weather" in groups:
             removals[f"ALL {main.lower()}"] = groups[main] + groups["Traffic x weather"]
-    # traffic follows a regular daily/weekly rhythm, so calendar features can
-    # stand in for it: removing both together shows whether they are substitutes
     if "ALL traffic" in removals and "Calendar" in groups:
         removals["ALL traffic + Calendar"] = removals["ALL traffic"] + groups["Calendar"]
-    # C1 -- does traffic matter BEYOND time of day? Keep calendar, weather and
-    # station, and keep only the "unexpected traffic" features (traffic minus
-    # what is normal for that station/hour/weekday, which the clock can't
-    # predict). Compare with "- ALL traffic": if this scores higher, traffic
-    # carries information the calendar can't supply.
     parts = group_traffic_parts(features)
     if "ALL traffic" in removals and "Unexpected traffic" in parts:
         keep = set(parts["Unexpected traffic"])
         removals["ALL traffic except unexpected"] = [f for f in removals["ALL traffic"] if f not in keep]
-    # C2 -- WHICH traffic factors matter: remove one part of traffic at a time
     for part, cols in parts.items():
         removals[f"traffic part: {part}"] = cols
     for family, cols in removals.items():
-        if len(cols) < len(features):  # removing the only family would leave nothing
+        if len(cols) < len(features):  
             out.append((f"- {family} ({len(cols)})", [f for f in features if f not in cols], True))
     out.append(("- sample weights", features, False))
     excluded = load_excluded_features(grain)

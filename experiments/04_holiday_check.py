@@ -1,48 +1,9 @@
 """
-CO2/NO2 Traffic-Emissions Capstone -- Public-holiday natural experiment
-
-Traffic and time of day move together (rush hour), so the models can't
-fully tell them apart (see experiments/03_ablation.py). Weekday public holidays break
-that link: the clock and the calendar look like a normal weekday, but much
-less traffic is on the road. If NO2 also drops on those days -- at the same
-station, hour and time of year, in similar weather -- that is evidence that
-traffic itself drives NO2, not just the time of day.
-
-Design
-  holiday days   weekday (Mon-Fri) public holidays
-  control days   normal working weekdays within +-14 days of a holiday,
-                 same station (so same season, same monitor)
-  1. raw comparison per station: average traffic and NO2, holiday vs control
-  2. adjusted estimate (linear regression on holiday + control rows):
-        NO2 = holiday effect + wind speed + temperature + humidity + rain
-              + station + hour of day (hourly) + month
-     and the same for log traffic, so the holiday effect on traffic (%) and
-     on NO2 (pphm and %) are measured the same way. 95% intervals come from
-     resampling whole holiday windows (a holiday and its control days
-     together), 500 times.
-  3. hourly profile (hourly data): holiday minus control, by hour of day, for
-     traffic and NO2 -- does the morning peak shrink when traffic does?
-
-Caveats (state them in the report): holidays are few (about 20 weekday
-holidays in 2024-2025) and cluster around Christmas / Easter, when other
-things also change (people away, industry closed), so this supports rather
-than proves a traffic effect.
-
-Reads data/processed/features_<grain>.csv (unscaled). Nothing is trained.
-
-Outputs (results/experiments/holiday/):
-  holiday_<grain>_by_station.csv   raw averages per station, holiday vs control
-  holiday_<grain>_effect.csv       adjusted holiday effect on traffic and NO2, with 95% CI
-  holiday_hourly_profile.png/.csv  holiday minus control by hour of day
-  holiday_<grain>_dose_response.png/.csv
-                                   per station: traffic change vs NO2 change,
-                                   with the correlation (bigger traffic drop ->
-                                   bigger NO2 drop = dose-response)
+Public-holiday check: compares NO2 on weekday public holidays (less traffic, same clock) against nearby normal weekdays at the same stations, to test whether traffic itself drives NO2 rather than just time of day.
 
 Usage:
-    python experiments/04_holiday_check.py                 # both grains
+    python experiments/04_holiday_check.py
     python experiments/04_holiday_check.py --grain hourly
-Run AFTER the pipeline's data stages (needs data/processed/).
 """
 
 from __future__ import annotations
@@ -66,7 +27,7 @@ from scripts.stations import add_station_name, station_label  # noqa: E402
 OUT_DIR = paths.HOLIDAY_DIR
 WINDOW_DAYS = 14
 WEATHER = ["wind_speed_ms", "temp_c", "humidity_pct", "rain_mm"]
-NEAR_MONITOR_KM = 2.0   # dose-response: stations this close to their NO2 monitor drawn solid
+NEAR_MONITOR_KM = 2.0  
 
 
 def load(grain: str) -> pd.DataFrame:
@@ -77,11 +38,10 @@ def load(grain: str) -> pd.DataFrame:
             "no2_pphm", "has_wind_data", *WEATHER] + (["hour_of_day"] if grain == "hourly" else [])
     df = pd.read_csv(path, usecols=lambda c: c in cols, dtype={"station_id": str}, low_memory=False)
     df["date"] = pd.to_datetime(df["date"])
-    df = df[df["calendar_day_of_week"] < 5].copy()          # weekdays only
+    df = df[df["calendar_day_of_week"] < 5].copy()          
     holidays = np.sort(df.loc[df["public_holiday"] == 1, "date"].unique())
     if len(holidays) == 0:
         return df.iloc[0:0]
-    # window id = the nearest weekday holiday; keep holidays + control days within +-14 days
     dates = df["date"].to_numpy()
     nearest = np.abs(dates[:, None] - holidays[None, :]).argmin(axis=1)
     gap = np.abs(dates - holidays[nearest]) / np.timedelta64(1, "D")
@@ -128,10 +88,10 @@ def effects(df: pd.DataFrame, grain: str, n_boot: int, seed: int) -> pd.DataFram
         est = holiday_coef(X, y, h)
         lo, hi = np.percentile(boot[k], [2.5, 97.5])
         row = {"grain": grain, "outcome": k, "holiday_effect": est, "ci_lo": lo, "ci_hi": hi}
-        if k.startswith("traffic"):  # log change -> % change
+        if k.startswith("traffic"): 
             row.update(percent=100 * np.expm1(est), percent_lo=100 * np.expm1(lo),
                        percent_hi=100 * np.expm1(hi))
-        else:                        # pphm -> % of the control-day average
+        else:                      
             row.update(percent=100 * est / control_no2, percent_lo=100 * lo / control_no2,
                        percent_hi=100 * hi / control_no2)
         rows.append(row)
@@ -158,11 +118,6 @@ def by_station(df: pd.DataFrame, grain: str) -> pd.DataFrame:
 
 
 def hourly_profile(df: pd.DataFrame) -> pd.DataFrame:
-    """Holiday minus control, by hour of day: traffic in % (per station, then
-    averaged) and NO2 in pphm. `thin_hour` marks hours with far fewer rows
-    than usual -- hour ending 02:00 is missing NO2 on ~80% of days at every
-    monitor (see 02_cleaning.py), so its average rests on a few days and can
-    jump around; the plot shows those points hollow."""
     m = df.groupby(["station_id", "hour_of_day", "holiday"])[["traffic_volume_total", "no2_pphm"]].mean()
     m = m.unstack("holiday").dropna()
     prof = pd.DataFrame({
@@ -202,12 +157,6 @@ def plot_profile(prof: pd.DataFrame, path: Path) -> None:
 
 
 def dose_response(stations: pd.DataFrame, grain: str) -> pd.DataFrame:
-    """One dot per station: how much traffic fell on holidays (x) against how
-    much NO2 fell (y). If traffic drives NO2, stations whose traffic dropped
-    more should see bigger NO2 drops (a dose-response pattern). Stations far
-    from their monitor are drawn hollow -- their NO2 reflects a wider area, so
-    they're expected to follow the pattern less closely. Raw averages, not
-    weather-adjusted (the adjusted overall effect is in holiday_<grain>_effect.csv)."""
     from scipy import stats
 
     from scripts.stations import STATIONS

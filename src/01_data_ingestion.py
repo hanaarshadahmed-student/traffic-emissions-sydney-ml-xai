@@ -1,51 +1,7 @@
 """
-CO2/NO2 Traffic-Emissions Capstone -- Raw Data Combination Script
-====================================================================
-Builds TWO final datasets from the raw traffic/weather/emissions files:
+Data ingestion: combines the raw traffic, weather and NO2 files into a daily dataset (all stations) and an hourly dataset (only stations with hourly weather and NO2 from a metro AQ site). Also rebuilds the public holiday column and adds speed zone and AQ site checks if those files are present.
 
-  1. DAILY  -- every candidate station, daily resolution. Uses BOM daily
-     weather for rural stations, so this is the only resolution at which
-     every station can be included on equal footing.
-
-  2. HOURLY -- only stations where BOTH weather AND NO2 come from a metro
-     AQ-network site (genuine hourly data on both sides). Rural/BOM-weather
-     stations are structurally excluded here since BOM only reports daily
-     min/max temp and rainfall, not hourly readings -- there's nothing to
-     build hourly data from for those stations.
-
-Fixes applied vs. the earlier version:
-  - `public_holiday` in the raw TfNSW export is broken (always 0, even on
-    New Year's Day). It's rebuilt here from a real NSW public holiday
-    calendar (the `holidays` package) instead of trusting the raw column.
-
-Station-metadata enrichment added:
-  - `matched_aq_site`/`aq_distance_km` are cross-checked (not overwritten)
-    against the NSW AQ site registry via haversine distance -- see
-    `verify_aq_site_matches()`. Any station whose hardcoded match isn't
-    the true nearest geocoded site is flagged for manual review (usually
-    because the nearest site doesn't measure NO2, which this registry
-    doesn't tell us -- so it's a flag, not an auto-correction).
-  - `posted_speed_kmh`/`speed_zone_type` are pulled from the TfNSW speed
-    zones shapefile via nearest-line matching -- see `match_speed_zones()`.
-    Both are optional: if the AQ site registry or the speed zones
-    shapefile aren't present locally, ingestion still runs, just without
-    those extra columns (a warning is printed either way).
-
-Design principle unchanged: nothing is filtered/dropped here except the
-above structural exclusion for the hourly build. Station-level modeling
-decisions (dropping no-NO2-coverage stations, thin-coverage stations,
-missing target rows) still happen in 02_cleaning.py, not here.
-
-Requires: pandas, python-calamine, holidays, pyshp
-    pip install pandas python-calamine holidays pyshp
-
-Expected folder layout (relative to project root):
-    data/raw/traffic/<station name>.csv
-    data/raw/weather/tmp_table_*_<site>.xls        - metro AQ-site weather
-    data/raw/weather/IDCJAC00{09,10,11}_..._<site>_Data.csv - BOM rural daily weather
-    data/raw/emissions/tmp_table_*_<site>.xls       - metro AQ-site pollutant data
-    data/raw/air_quality/nsw_air_quality_sites.json - optional, enables AQ-site verification
-    data/raw/speed_zones/Speed_Zones.{shp,shx,dbf,prj} - optional, enables posted-speed matching
+Requires: pip install pandas python-calamine holidays pyshp
 """
 
 import pandas as pd
@@ -92,8 +48,6 @@ def find_metro_file(directory, keyword, ext="xls"):
 
 
 def read_metro_xls(path):
-    """Read the AQ-portal .xls export directly. Non-standard file, xlrd/openpyxl
-    can't open it -- python-calamine handles it fine."""
     return pd.read_excel(path, engine="calamine", skiprows=2)
 
 
@@ -102,7 +56,7 @@ def real_public_holiday(dates):
 
 
 # ---------------------------------------------------------------------------
-# STATION METADATA ENRICHMENT -- AQ-site verification (flag only, no overwrite)
+# STATION METADATA ENRICHMENT 
 # ---------------------------------------------------------------------------
 
 def _haversine_km(lat1, lon1, lat2, lon2):
@@ -115,22 +69,12 @@ def _haversine_km(lat1, lon1, lat2, lon2):
 
 
 def _same_aq_site(hardcoded: str, nearest: str) -> bool:
-    """True if the registry's nearest site is the hardcoded site, allowing
-    for registry label variants -- e.g. hardcoded "LIVERPOOL" vs registry
-    "LIVERPOOL SWAQS" (0.2km apart, same physical site). The old check only
-    tested nearest-in-hardcoded, so that pair was wrongly flagged REVIEW
-    and station 100001 was down-weighted to 0.5 in training."""
     hard = hardcoded.upper().split(" (")[0].strip()
     near = nearest.upper().strip()
     return near in hard or hard in near
 
 
 def verify_aq_site_matches(stations, sites_path=AQ_SITES_PATH):
-    """Cross-check each station's hardcoded aq_site/aq_distance_km against
-    the true nearest geocoded AQ site (haversine). Does NOT correct
-    STATIONS -- NO2 availability per site isn't in this registry, so the
-    hardcoded (farther) site may still be the deliberate, correct choice.
-    Returns None if the registry file isn't present (feature is optional)."""
     if not os.path.exists(sites_path):
         print(f"  [AQ verification] SKIPPED -- '{sites_path}' not found.")
         return None
@@ -169,10 +113,10 @@ def verify_aq_site_matches(stations, sites_path=AQ_SITES_PATH):
 
 
 # ---------------------------------------------------------------------------
-# STATION METADATA ENRICHMENT -- posted speed limit (speed zones shapefile)
+# STATION METADATA ENRICHMENT
 # ---------------------------------------------------------------------------
 
-_EARTH_R = 6378137.0  # matches Speed_Zones.prj (WGS_1984_Web_Mercator_Auxiliary_Sphere)
+_EARTH_R = 6378137.0 
 
 
 def _lonlat_to_webmercator(lon, lat):
@@ -190,10 +134,6 @@ def _point_seg_dist(px, py, ax, ay, bx, by):
 
 
 def match_speed_zones(stations, shp_path=SPEED_ZONES_SHP, search_radius_m=500):
-    """One pass through the (447k-record) shapefile, checked against every
-    station's bbox at once -- looping stations on the outside would rescan
-    the full file per station instead. Returns {} if the shapefile isn't
-    present locally (feature is optional)."""
     if not os.path.exists(shp_path):
         print(f"  [Speed zones] SKIPPED -- '{shp_path}' not found.")
         return {}
@@ -236,8 +176,6 @@ def match_speed_zones(stations, shp_path=SPEED_ZONES_SHP, search_radius_m=500):
 
 
 def _attach_station_metadata(merged, station_id, station_file, cfg, aq_verification, speed_zone_info):
-    """Shared metadata-attach step used by both build_daily() and
-    build_hourly() -- static per-station attributes, not per-row logic."""
     merged["station_id"] = station_id
     merged["station_name"] = station_file
     merged["station_lat"] = cfg["lat"]
@@ -307,11 +245,6 @@ def load_metro_weather_daily(path):
 
 
 def add_borrowed_rain(weather, cfg, loader, keys):
-    """Some monitors (Earlwood, St Marys) record wind, temperature and humidity
-    but not rainfall. For those, STATIONS gives `rain_from` = the nearest
-    monitor that does, and its rainfall is used instead -- better than the
-    imputation step filling every hour with one constant (which would say it
-    never rained there)."""
     source = cfg.get("rain_from")
     if not source or ("rain_mm" in weather.columns and weather["rain_mm"].notna().any()):
         return weather

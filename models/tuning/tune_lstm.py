@@ -1,27 +1,9 @@
-"""Tune the LSTM on the same split files, features and scoring as every other model.
+"""
+Tune LSTM: searches LSTM settings (history window, network size, dropout, learning rate) and picks the best on the validation split. Slowest tuning step; needs PyTorch.
 
-What is searched (see config/tuning.yaml):
-  window        how much history the LSTM sees: short / medium / long. The real
-                length depends on the grain (window_lengths in tuning.yaml),
-                e.g. hourly: 12 / 24 / 48 hours, daily: 7 / 14 / 28 days
-  hidden_size   width of the network (bigger = more capacity, slower)
-  num_layers    stacked LSTM layers
-  dropout       share of units randomly switched off while training (more =
-                less overfitting)
-  learning_rate how big each training step is
-  batch_size    rows per training step
-  weight_decay  penalty on large weights (more = less overfitting)
-
-Each trial trains a full LSTM (early-stopping on the validation split, exactly
-as in the default run), so this is the SLOWEST tuning step: an hourly trial
-takes roughly 1-2 minutes, so keep n_trials small while experimenting.
-The winner is chosen on validation only; test is scored once afterwards.
-Learning curves are skipped for the LSTM (they'd mean re-training it five more
-times per feature set).
-
-Run on its own:   python models/tuning/tune_lstm.py
-Or as part of:    python run_pipeline.py --stage tune --models lstm
-Needs PyTorch (pip install torch).
+Usage:
+    python models/tuning/tune_lstm.py
+    python run_pipeline.py --stage tune --models lstm
 """
 
 from __future__ import annotations

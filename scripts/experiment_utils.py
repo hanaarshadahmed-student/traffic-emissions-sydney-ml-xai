@@ -1,13 +1,7 @@
 """
-Shared helpers for the extra experiments run AFTER the main pipeline
-(leave-one-station-out, ablation, permutation importance). They retrain or
-re-score models outside run_pipeline.py, so they never touch results.json.
-
-Every model is built from its settings in config/config.yaml
-(training.models.<name>.params), with the same sample weights and scoring
-as 06_run_models.py.
+Experiment helpers: shared code for the extra experiments run after the main pipeline (leave-one-station-out, ablation, permutation importance). 
+Builds and scores models the same way as 06_run_models.py, without touching results.json.
 """
-
 from __future__ import annotations
 
 import os
@@ -31,7 +25,6 @@ def load_config(path: Path = paths.CONFIG_PATH) -> dict:
 
 
 def build(name: str, config: dict, n_jobs: int | None = None):
-    """A fresh, untrained model with its config.yaml settings."""
     if name not in TABULAR_MODELS:
         raise SystemExit(f"{name!r}: only the row-based models are supported here "
                          f"({', '.join(TABULAR_MODELS)}) -- LSTM/GRU need sequences and take far longer.")
@@ -55,7 +48,6 @@ def weight_column(grain: str) -> str:
 
 def fit_score(model, train: pd.DataFrame, evals: dict[str, pd.DataFrame], features: list[str],
               weight_col: str | None) -> dict[str, dict]:
-    """Fit on `train` (weighted if weight_col), score on each frame in `evals`."""
     weights = train[weight_col] if weight_col else None
     if weights is None:
         model.fit(train[features], train[TARGET])
@@ -76,9 +68,6 @@ def r2(y_true, y_pred) -> float:
 
 
 def explained_xgboost(grain: str, feature_set: str, config: dict, features: list[str]):
-    """The same XGBoost the SHAP stage explains: the tuned one saved by the
-    tune stage if it was trained on exactly these features, otherwise the
-    default one refitted on train. Returns (model, description)."""
     import joblib
 
     path = paths.SAVED_MODELS_DIR / f"xgboost_{grain}_{feature_set}.joblib"

@@ -1,4 +1,10 @@
-"""Tune and train SVR on the shared scaled tabular dataset."""
+"""
+Tune SVR: searches SVR settings and picks the best on the validation split.
+
+Usage:
+    python models/tuning/tune_svr.py
+    python run_pipeline.py --stage tune --models svr
+"""
 
 from __future__ import annotations
 

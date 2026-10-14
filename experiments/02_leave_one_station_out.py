@@ -1,37 +1,9 @@
 """
-CO2/NO2 Traffic-Emissions Capstone -- Leave-one-station-out (LOSO) testing
-
-Would the model work at a station it has NEVER seen? The main test split only
-checks LATER DATES at the SAME stations. Here, for each station in turn:
-  1. train on every OTHER station (all dates: train + val + test periods)
-  2. predict the held-out station (all its dates) and score it
-so each station gets an "unseen location" score.
-
-Default feature set is `exogenous` (traffic, weather, calendar, road/station):
-at a genuinely new location there is no NO2 monitor, so NO2-history features
-wouldn't exist. Use --feature-set all to see the forecasting version.
-
-Reference line: "network mean" predicts every row as the average NO2 of the
-training stations -- what you'd guess with no model at all. A model is only
-useful at a new site if it beats this. Expect wide variation between
-stations: with ~9 stations, each held-out station is a large part of the
-data and may be unlike all the others (that variation IS the finding).
-
-Models use their config.yaml settings (training.models.<name>.params) and the
-same sample weights as the main pipeline. Nothing here touches results.json.
-
-Outputs (results/experiments/loso/):
-  loso_<grain>_<feature_set>.csv           every station x model: rows, R2, RMSE, MAE
-  loso_<grain>_<feature_set>_summary.csv   per model: mean / median / worst / best
-                                           station R2, and R2 pooled over all stations
-  loso_<grain>_<feature_set>.png           R2 per held-out station
+Leave-one-station-out (LOSO) testing: trains on all stations but one, then scores the model on the held-out station, so you can see whether it works at a location it has never seen.
 
 Usage:
-    python experiments/02_leave_one_station_out.py                     # daily+hourly, ridge+xgboost
+    python experiments/02_leave_one_station_out.py
     python experiments/02_leave_one_station_out.py --grain daily --models ridge xgboost random_forest
-    python experiments/02_leave_one_station_out.py --feature-set all
-Run AFTER the pipeline (needs data/processed/splits/). Hourly with
-random_forest takes several minutes per station.
 """
 
 from __future__ import annotations

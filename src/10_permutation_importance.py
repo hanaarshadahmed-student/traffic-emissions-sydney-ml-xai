@@ -1,46 +1,9 @@
 """
-CO2/NO2 Traffic-Emissions Capstone -- Permutation importance (explain stage, part 2)
-
-Two questions, one test:
-  1. Does a second, independent method agree with SHAP? (XGBoost)
-  2. Do the most accurate models rely on the same drivers? SHAP (09) explains
-     XGBoost, but on hourly data the GRU and LSTM score higher.
-
-So for each grain and feature set this script takes the THREE most accurate
-ML models by test R2 (from 07_evaluation.py's all_results.csv), plus XGBoost
-if it isn't among them, and runs permutation importance on each.
-
-Permutation importance: shuffle one feature family (all weather features,
-all traffic features, ...) across the test rows, so its values no longer
-match their rows, and re-score. The drop in R2 is how much the model depends
-on that family. Families are shuffled as a WHOLE: shuffling one traffic
-feature looks harmless while 40 others still carry the same information.
-It needs only the model's predictions, so it works the same way for
-XGBoost, SVR, LSTM and GRU; for LSTM / GRU the shuffle is applied to every
-hour (or day) of the input window at once. Each shuffle is repeated
---repeats times; the spread is the error bar.
-
-Outputs (results/latest/permutation/):
-  top3_families_<grain>_<feature_set>.csv   R2 drop per family for each model,
-                                            each model's rank, and XGBoost's SHAP share
-  top3_agreement_<grain>_<feature_set>.csv  Spearman rank agreement between every pair
-                                            of models, and with XGBoost's SHAP ranking
-                                            ("XGBoost vs XGBoost SHAP" = question 1)
-  top3_traffic_parts_<grain>_<feature_set>.csv   the same for the parts of traffic
-  top3_<grain>_<feature_set>.png            family importance, models side by side
-  top3_window_<grain>_<feature_set>_<model>.csv/.png   LSTM / GRU only: which
-                                            position of the input window matters
-                                            (how far back the model looks)
-
-Models: the tuned versions saved by the tune stage (results/saved_models/).
-A tree / linear / SVR model without a matching saved file is refitted with
-its default settings (and labelled so); an LSTM / GRU without one is skipped.
+Permutation importance: shuffles one feature family at a time on the test rows for the top 3 models (plus XGBoost) and measures the R2 drop, to check whether the best models rely on the same drivers and whether this agrees with SHAP.
 
 Usage:
     python src/10_permutation_importance.py
-    python src/10_permutation_importance.py --grain hourly --feature-set exogenous --top 3
-    python src/10_permutation_importance.py --grain hourly --models gru xgboost
-Run AFTER 07_evaluation.py (model ranking) and 09_shap_explainability.py (SHAP shares).
+    python src/10_permutation_importance.py --grain hourly --feature-set exogenous
 """
 
 from __future__ import annotations
@@ -75,8 +38,6 @@ UNIT = {"daily": "days", "hourly": "hours"}
 
 
 def top_models(grain: str, feature_set: str, n: int) -> list[str]:
-    """The n ML models with the highest test R2 (tuned version where there is
-    one), plus XGBoost -- the model SHAP explains -- if it isn't among them."""
     path = paths.EVALUATION_DIR / "all_results.csv"
     if not path.exists():
         return []
@@ -122,8 +83,6 @@ class TabularScorer:
 
 
 class SequenceScorer:
-    """LSTM / GRU: each prediction looks at a window of past rows."""
-
     def __init__(self, name, grain, feature_set, frames, rows):
         import torch
 
@@ -175,7 +134,6 @@ class SequenceScorer:
             self.data.features[block] = self.original[block]
 
     def window_importance(self, y, base, repeats, rng) -> pd.DataFrame:
-        """R2 drop when ONE position of the input window is shuffled across rows."""
         import torch
 
         from models.sequence_models import _gather
@@ -193,10 +151,6 @@ class SequenceScorer:
 
 
 def _rebuild_old_save(state_dict, name, grain, feature_set, frames) -> dict:
-    """Older tune_lstm.py saved only the network weights. Everything else can
-    be recovered without retraining: layer sizes from the weight shapes, the
-    window length from the tuning summary, the target scaling from the train
-    split (the model used its mean / std), the features from the manifest."""
     prefix = "lstm" if name == "lstm" else "gru"
     w_ih = state_dict[f"{prefix}.weight_ih_l0"]
     features = get_feature_columns(grain, feature_set)

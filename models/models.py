@@ -1,49 +1,9 @@
 """
-Model registry -- the ML models.
-
-The project compares two kinds of method:
-
-  ML MODELS (this file) -- learn from the features; switched on/off under
-  training.models in config/config.yaml:
-      1. ridge           linear regression with L2 regularisation
-      2. decision_tree   a single regression tree
-      3. random_forest   bagged ensemble of trees
-      4. xgboost         gradient-boosted trees
-      5. svr             support vector regression (RBF kernel)
-      6. lstm            recurrent neural network over a window of recent
-                         time steps (models/sequence_models.py, needs PyTorch)
-      7. gru             gated recurrent unit network over hourly sequences
-                         (models/sequence_models.py, needs PyTorch)
-
-  BASELINE METHODS (not ML -- defined in src/06_run_models.py, switched
-  on/off under training.baselines in config/config.yaml):
-      B1. naive_persistence           NO2 = the last observed value
-      B2. naive_seasonal_climatology  NO2 = the station's train-period
-                                      average for that month (and hour)
-  Baselines learn nothing from the features; they're the minimum score
-  an ML model has to beat to show it has learned something useful.
-
-REGISTRY maps each config model name to its estimator class.
-06_run_models.py and the tuning scripts build models through it, so every
-model is loaded, trained and scored the same way.
+Model registry: maps each model name in config.yaml to its estimator class, so every model is built, trained and scored the same way.
 
 To add a model:
   1. Import its class below and add one line to REGISTRY.
   2. Add a matching block under training.models in config/config.yaml.
-Any scikit-learn-compatible estimator (.fit()/.predict()) works. A model
-that needs sequences of time steps instead of single rows (LSTM or GRU)
-sets `needs_sequences = True`; see models/sequence_models.py.
-
-Notes on individual models:
-  ridge -- also a diagnostic. If the trees score a negative R2 on the
-    "exogenous" feature set, compare against Ridge (which can't memorise
-    per-station quirks):
-      * Ridge also negative / near zero -> little learnable signal in
-        traffic/weather alone (not a modelling-technique problem).
-      * Ridge clearly better -> the trees are overfitting (most likely
-        the very-short-history stations), not useless features.
-    05_train_test_split.py scales continuous features and leaves 0/1
-    columns unscaled, so Ridge, SVR and the LSTM work out of the box.
 """
 
 from sklearn.ensemble import RandomForestRegressor
@@ -54,8 +14,6 @@ from xgboost import XGBRegressor
 
 
 def _lstm(**params):
-    # imported only when the LSTM is actually used, so the rest of the
-    # pipeline still runs on a machine without PyTorch installed
     from models.sequence_models import LSTMRegressor
     return LSTMRegressor(**params)
 
@@ -98,13 +56,10 @@ def display_name(name: str) -> str:
 
 
 def model_type(name: str) -> str:
-    """'baseline' for the naive baseline methods, 'ML' for everything else."""
     return "baseline" if name in BASELINE_METHODS else "ML"
 
 
 def build_model(name: str, **params):
-    """Unfitted estimator for a config model name, e.g.
-    build_model("random_forest", n_estimators=300)."""
     if name not in REGISTRY:
         raise KeyError(f"Unknown model {name!r}. Known models: {sorted(REGISTRY)}")
     return REGISTRY[name](**params)

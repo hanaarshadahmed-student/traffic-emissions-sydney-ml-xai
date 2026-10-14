@@ -1,4 +1,10 @@
-"""Tune the GRU on hourly sequence data with validation-only model selection."""
+"""
+Tune GRU: searches GRU settings on the hourly sequence data and picks the best on the validation split.
+
+Usage:
+    python models/tuning/tune_gru.py
+    python run_pipeline.py --stage tune --models gru
+"""
 
 from __future__ import annotations
 

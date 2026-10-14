@@ -1,42 +1,9 @@
 """
-CO2/NO2 Traffic-Emissions Capstone -- Bootstrap confidence intervals
-
-How sure can we be about each model's test score, and are the top models
-really different or just tied? This script answers both from the row-by-row
-predictions the train/tune stages save in results/latest/predictions/. Nothing is
-retrained -- it only re-scores saved predictions.
-
-Method (block bootstrap):
-  1. Split the test rows into blocks of one station x one calendar week.
-     Whole weeks are resampled together because NO2 on neighbouring days /
-     hours is correlated; resampling single rows would pretend there is more
-     independent data than there is and give intervals that are too narrow.
-  2. Draw that many blocks WITH replacement (some weeks twice, some not at
-     all) and recompute R2 / RMSE / MAE on the resampled rows. Repeat
-     --n-boot times (default 1000).
-  3. The 95% interval is the middle 95% of those scores (2.5th-97.5th
-     percentile).
-  4. Every model is scored on the SAME resampled rows in each round
-     (a paired bootstrap), so the difference between two models gets its own
-     interval. If the interval for "best model minus this model" contains 0,
-     the two are statistically indistinguishable (a tie).
-
-Which version of each model: the tuned one if its predictions are saved,
-otherwise the default one (--stage default / tuned forces one). Baselines
-(B1/B2) don't use features, so their predictions are shared across feature
-sets.
-
-Outputs (results/latest/evaluation/):
-  bootstrap_<grain>_<split>.csv           every model: score + 95% interval
-  bootstrap_<grain>_<split>_vs_best.csv   each model vs the best one in its
-                                          feature set (paired difference)
-  bootstrap_<grain>_<split>.png           R2 with 95% intervals, per feature set
+Bootstrap confidence intervals: resamples the saved test predictions in station-week blocks to give each model's score a 95% interval and check whether the top models are really different or tied. Nothing is retrained.
 
 Usage:
-    python src/08_bootstrap_ci.py                       # both grains, test split
-    python src/08_bootstrap_ci.py --grain hourly
-    python src/08_bootstrap_ci.py --split val --n-boot 2000
-Run AFTER the pipeline (it needs results/latest/predictions/ and data/processed/splits/).
+    python src/08_bootstrap_ci.py
+    python src/08_bootstrap_ci.py --grain hourly --n-boot 2000
 """
 
 from __future__ import annotations
@@ -81,8 +48,6 @@ def find_prediction_files(grain: str, split: str) -> pd.DataFrame:
 
 
 def choose_versions(files: pd.DataFrame, stage: str) -> pd.DataFrame:
-    """One prediction file per (model, feature_set): tuned if available
-    (stage='best'), or exactly the stage asked for."""
     if stage != "best":
         return files[files["stage"] == stage]
     files = files.assign(_rank=(files["stage"] != "tuned").astype(int))
@@ -90,7 +55,6 @@ def choose_versions(files: pd.DataFrame, stage: str) -> pd.DataFrame:
 
 
 def load_blocks(grain: str, split: str, n_rows: int) -> tuple[np.ndarray, pd.Series]:
-    """Block id (station x ISO week) for every row of the split, in row order."""
     path = paths.SPLITS_DIR / f"{grain}_{split}.csv"
     meta = pd.read_csv(path, usecols=["station_id", "timestamp"], dtype={"station_id": str})
     if len(meta) != n_rows:
@@ -102,7 +66,6 @@ def load_blocks(grain: str, split: str, n_rows: int) -> tuple[np.ndarray, pd.Ser
 
 
 def load_predictions(chosen: pd.DataFrame, station_ids: pd.Series) -> tuple[np.ndarray, dict]:
-    """y_true (shared) and {(model, stage, feature_set): y_pred}."""
     y_true, preds = None, {}
     for item in chosen.itertuples():
         frame = pd.read_csv(item.path, dtype={"station_id": str}).sort_values("row")
@@ -120,8 +83,6 @@ def load_predictions(chosen: pd.DataFrame, station_ids: pd.Series) -> tuple[np.n
 
 # --- scoring -------------------------------------------------------------------
 def scores(y: np.ndarray, p: np.ndarray) -> tuple[float, float, float]:
-    """(r2, rmse, mae) -- works on a single sample (1-D) or many at once (2-D,
-    one resample per row)."""
     err = p - y
     ss_res = np.sum(err ** 2, axis=-1)
     ss_tot = np.sum((y - y.mean(axis=-1, keepdims=True)) ** 2, axis=-1)
@@ -130,7 +91,6 @@ def scores(y: np.ndarray, p: np.ndarray) -> tuple[float, float, float]:
 
 
 def bootstrap_indices(blocks: np.ndarray, n_boot: int, seed: int):
-    """Yield row indices for each bootstrap round (whole blocks resampled)."""
     rng = np.random.default_rng(seed)
     order = np.argsort(blocks, kind="stable")
     starts = np.r_[0, np.flatnonzero(np.diff(blocks[order])) + 1]
@@ -197,8 +157,6 @@ def run(grain: str, split: str, n_boot: int, stage: str, seed: int) -> pd.DataFr
 
 
 def compare_to_best(table: pd.DataFrame, boot: dict) -> pd.DataFrame:
-    """Per feature set: the best ML model (highest R2) minus every other
-    model, with a paired 95% interval for that difference."""
     rows = []
     for fs, group in table.groupby("feature_set", sort=False):
         ml = group[~group["model"].isin(BASELINES)]

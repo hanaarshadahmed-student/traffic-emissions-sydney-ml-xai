@@ -1,0 +1,98 @@
+{
+  "run_id": "2026-10-14_130022_daily-hourly_final_run_report_ready",
+  "status": "ok",
+  "started": "2026-10-14T13:00:22",
+  "finished": "2026-10-14T21:16:54",
+  "command": "python.exe run_pipeline.py --jobs 6 --experiments --name final_run_report_ready",
+  "stages": [
+    {
+      "stage": "ingest",
+      "seconds": 12.8
+    },
+    {
+      "stage": "clean",
+      "seconds": 2.2
+    },
+    {
+      "stage": "preprocess",
+      "seconds": 2.0
+    },
+    {
+      "stage": "features",
+      "seconds": 16.0
+    },
+    {
+      "stage": "split",
+      "seconds": 23.3
+    },
+    {
+      "stage": "train",
+      "seconds": 1778.3
+    },
+    {
+      "stage": "tune",
+      "seconds": 27156.6
+    },
+    {
+      "stage": "evaluate",
+      "seconds": 11.2
+    },
+    {
+      "stage": "explain",
+      "seconds": 386.3
+    },
+    {
+      "stage": "experiments",
+      "seconds": 401.7
+    }
+  ],
+  "grains": [
+    "daily",
+    "hourly"
+  ],
+  "feature_sets": [
+    "exogenous",
+    "autoregressive",
+    "all"
+  ],
+  "models_enabled": [
+    "ridge",
+    "decision_tree",
+    "random_forest",
+    "xgboost",
+    "svr",
+    "lstm",
+    "gru"
+  ],
+  "station_exclusions_enabled": true,
+  "scores_saved": 270,
+  "output_files_saved": 741,
+  "git": {
+    "available": true,
+    "commit": "09952c4454f392153159c732fc61859257506d46",
+    "branch": "hana_analysis",
+    "uncommitted_changes": true
+  },
+  "python": "3.12.10",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "packages": {
+    "pandas": "3.0.5",
+    "numpy": "2.5.2",
+    "scikit-learn": "1.9.1",
+    "xgboost": "3.4.1",
+    "torch": "2.14.1",
+    "scipy": "1.18.1",
+    "holidays": "0.103",
+    "python-calamine": "0.8.2",
+    "pyshp": "3.1.6",
+    "pyyaml": "6.0.3",
+    "matplotlib": "3.11.2"
+  },
+  "raw_data": {
+    "files": 93,
+    "total_mb": 605.1,
+    "sha256": "d7120f4082a69506",
+    "speed_zones_present": true,
+    "aq_sites_present": true
+  }
+}

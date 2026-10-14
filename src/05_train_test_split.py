@@ -1,36 +1,9 @@
 """
-CO2/NO2 Traffic-Emissions Capstone -- Train/Val/Test Split + Scaling
+Train/val/test split: splits the daily and hourly features by date (one global cutoff, not random, so no future data leaks into training) and scales features using the train split only.
 
-Splits features_daily.csv / features_hourly.csv into train/val/test and
-fits feature scaling -- the step between feature engineering and modeling.
-
-Two choices here matter more than they look:
-
-1. The split is CHRONOLOGICAL, not random, with ONE GLOBAL CUTOFF DATE
-   for every station (see split_utils.py for why it is no longer per
-   station -- stations sharing an AQ site leaked targets across splits). Random
-   splitting would leak information: a test-set row's lag/rolling features
-   are computed from timestamps that could land in the training set,
-   letting the model implicitly see the future. A consequence of the
-   global cutoff: stations whose data ends early sit entirely in train,
-   so val/test evaluate the long-running stations (see data/Data.md).
-
-2. The scaler is fit on the TRAIN split ONLY, then applied unchanged to
-   val/test. Fitting on the full dataset first would leak test-set
-   statistics (mean/std) into training. Binary/one-hot columns (season,
-   road bucket, station dummies, availability flags, ...) are left
-   unscaled -- scaling a 0/1 flag doesn't help any of the baseline models
-   and would make the coefficients harder to read for the linear/SVR
-   models downstream.
-
-Input:  data/processed/features_daily.csv
-        data/processed/features_hourly.csv
-        data/processed/feature_manifest.json
-Output: data/processed/splits/{grain}_train.csv
-        data/processed/splits/{grain}_val.csv
-        data/processed/splits/{grain}_test.csv
-        data/processed/splits/{grain}_scaler.joblib
-        data/processed/splits/split_manifest.json
+Usage:
+    python src/05_train_test_split.py
+    python run_pipeline.py --stage split
 """
 
 from __future__ import annotations

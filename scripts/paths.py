@@ -1,20 +1,11 @@
 """
-Every folder and file location the project uses, defined once.
-
-All scripts import from here instead of hard-coding "data/processed" etc.,
-so moving a folder is a one-line change in this file. Paths are absolute
-(built from this file's location), so scripts work no matter which folder
-you run them from.
+Paths: every folder and file location the project uses, defined once so scripts don't hard-code them and work from any folder.
 """
 
 import os
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-
-# A sensitivity run (run_pipeline.py --sensitivity <name>) sets this, and then
-# its processed data, results and models go to their own folders, so it can
-# never overwrite the main analysis.
 SENSITIVITY_ENV = "NO2_SENSITIVITY"
 SENSITIVITY = os.environ.get(SENSITIVITY_ENV) or None
 
@@ -40,18 +31,25 @@ SPLITS_DIR = PROCESSED_DIR / "splits"
 FEATURE_MANIFEST_PATH = PROCESSED_DIR / "feature_manifest.json"
 SPLIT_MANIFEST_PATH = SPLITS_DIR / "split_manifest.json"
 
-# --- results ------------------------------------------------------------------
-#   results/latest/       outputs of the main pipeline (src/), overwritten each run
-#   results/experiments/  outputs of the extra checks (experiments/)
-#   results/saved_models/ fitted tuned models (large, not in git)
-#   results/runs/         a saved copy of every run, with its config and log
-#   results/sensitivity/<name>/  everything from one sensitivity run
+# --- results -------------------------------------------------------------------
+#   results/              ONLY the curated results the report is written from
+#                         (README + run/, 1_data/ ... 5_errors/), rebuilt by
+#                         src/11_final_results.py after every complete run. Tracked in git.
+#   working/              everything the stages pass to each other -- not results.
+#                         Emptied at the start of every full run. Not in git.
+#     working/latest/        outputs of the main pipeline (src/)
+#     working/experiments/   outputs of the extra checks (experiments/)
+#     working/saved_models/  fitted tuned models (reused by the explain stage)
+#     working/runs/<id>/     the last run's complete record: config, log, scores,
+#                            every output (~750 files) -- the backup
+#     working/sensitivity/<name>/  the same for one sensitivity run
 RESULTS_DIR = ROOT_DIR / "results"
-RUNS_DIR = RESULTS_DIR / "runs"
-_BASE = RESULTS_DIR if not SENSITIVITY else RESULTS_DIR / "sensitivity" / SENSITIVITY
-LATEST_DIR = _BASE / "latest"
-EXPERIMENTS_RESULTS_DIR = _BASE / "experiments"
-SAVED_MODELS_DIR = _BASE / "saved_models"
+WORKING_DIR = ROOT_DIR / "working"
+RUNS_DIR = WORKING_DIR / "runs"
+WORKING_BASE = WORKING_DIR if not SENSITIVITY else WORKING_DIR / "sensitivity" / SENSITIVITY
+LATEST_DIR = WORKING_BASE / "latest"
+EXPERIMENTS_RESULTS_DIR = WORKING_BASE / "experiments"
+SAVED_MODELS_DIR = WORKING_BASE / "saved_models"
 
 # main pipeline
 RESULTS_PATH = LATEST_DIR / "results.json"        # every model's scores

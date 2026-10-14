@@ -14,8 +14,9 @@
 #   all         every stage in order: ingest -> clean -> preprocess ->
 #               features -> split -> train -> (tune) -> evaluate -> explain
 #               (-> experiments, if run_experiments / --experiments).
-#               Empties data/processed/ first so a run never mixes with a
-#               stale one. results/ is kept (results.json is a cross-run log).
+#               Empties data/processed/ and working/ first so a run never
+#               mixes with a stale one. A complete run (tuning + experiments)
+#               then rebuilds results/ -- the curated files the report uses.
 #   <stage>     just that one stage, reusing what's already on disk:
 #               ingest | clean | preprocess | features | split | train | tune | evaluate | explain | experiments
 #
@@ -28,7 +29,7 @@ pipeline:
                           # public-holiday check (a few minutes)
   jobs: auto          # models trained at the same time: a number, or auto =
                       # one per 4 CPU cores (max 4). 1 = one at a time.
-  save_run: true      # save results + this config + log to results/runs/<run_id>/
+  save_run: true      # save results + this config + log to working/runs/<run_id>/
                       # whenever train/tune/evaluate runs (see scripts/run_record.py)
 
 # ---------------------------------------------------------------------------
@@ -185,7 +186,7 @@ training:
         random_state: 42
 
 # ---------------------------------------------------------------------------
-# explainability -- SHAP on the XGBoost model (stage 08, results/latest/shap/)
+# explainability -- SHAP on the XGBoost model (stage 08, working/latest/shap/)
 # ---------------------------------------------------------------------------
 # Uses the tuned XGBoost saved by the tune stage (or refits the default one if
 # there isn't one). Runs for the grains in training.grain.

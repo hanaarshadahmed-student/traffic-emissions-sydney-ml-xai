@@ -1,59 +1,9 @@
 """
-CO2/NO2 Traffic-Emissions Capstone -- Stage 08: Explainability (SHAP)
-
-Explains the tuned XGBoost model: which inputs push the predicted NO2 up or
-down, and by how much. Nothing is tuned here; the model is the one the tune
-stage saved (results/saved_models/xgboost_<grain>_<feature_set>.joblib). If
-none is saved yet, XGBoost is refitted on the train split with the settings
-in config.yaml, so this stage also works after a --no-tune run.
-
-Two views per grain (set under `explainability:` in config.yaml):
-  all         exogenous + NO2 history: explains the best FORECASTING model.
-              Expect the NO2 lags to dominate -- that is the "what does the
-              model use" answer.
-  exogenous   traffic / weather / calendar / road / station only: explains
-              what EXTERNAL factors drive NO2 -- the "traffic vs weather"
-              answer the research question is really after.
-
-How to read the outputs:
-  SHAP value  how many NO2 units one feature moved ONE prediction away from
-              the average prediction. Positive = pushed NO2 up.
-  importance  mean |SHAP| over the explained rows = the feature's typical
-              effect size (same units as the target, pphm).
-  direction   correlation between a feature's value and its SHAP value:
-              positive = higher values raise NO2, negative = lower it.
-              (Rough guide only -- see the dependence plots for the shape.)
-  The model sees scaled features (05_train_test_split.py), but the plots
-  undo the scaling, so axes and colours show real units (m/s, %, vehicles).
-  Dummies for stations with no rows in the explained split (train-only
-  stations) are left out of the ranking and plots -- see explain().
-
-Outputs (results/latest/shap/):
-  importance_<grain>_<feature_set>.csv      every feature: importance, share, direction
-  summary_<grain>_<feature_set>.png         beeswarm: effect and value, top features
-  bar_<grain>_<feature_set>.png             mean |SHAP| bar chart, top features
-  dependence_<grain>_<feature_set>_<feature>.png   effect against value, top features
-  groups_<grain>_<feature_set>.csv          importance summed by feature family
-  shap_values_<grain>_<feature_set>.csv.gz  SHAP value of every explained row
-  interaction_traffic_wind_<grain>_<feature_set>.png/.csv
-                                            traffic effect vs traffic volume, one
-                                            line per wind-speed third
-  groups_by_road_type_<grain>_<feature_set>.png/.csv
-  top_features_by_road_type_<grain>_<feature_set>.csv
-                                            importance per road type, on TRAIN rows
-                                            (the only split with several stations
-                                            per road type); --no-road-type skips it
-
-Families: "Traffic x weather" holds features that mix both (mainly
-traffic_dispersion_proxy = log traffic / (1 + wind speed)), so the "Traffic"
-share is pure traffic.
+SHAP explainability: explains the tuned XGBoost model, showing which features push predicted NO2 up or down and by how much, for both the "all" features (forecasting) and "exogenous" features (traffic vs weather) views. Needs shap (pip install shap).
 
 Usage:
     python src/09_shap_explainability.py
     python src/09_shap_explainability.py --grain hourly --feature-set exogenous
-    python src/09_shap_explainability.py --max-rows 20000 --top 20
-Or as part of:   python run_pipeline.py --stage explain
-Needs the `shap` package (pip install shap).
 """
 
 from __future__ import annotations
@@ -91,11 +41,6 @@ def load_main_config(path: Path) -> dict:
 
 
 def get_model(grain: str, feature_set: str, main_config: dict, features: list[str]):
-    """The tuned XGBoost if the tune stage saved one AND it was trained on
-    exactly these features, else a fresh fit on train. The check matters
-    because results/saved_models/ survives between runs: after a run with
-    different data (e.g. a station excluded for a sensitivity check) the
-    saved model can expect different columns than the current splits."""
     model_path = paths.SAVED_MODELS_DIR / f"xgboost_{grain}_{feature_set}.joblib"
     reason = "no tuned model saved yet"
     if model_path.exists():
@@ -114,9 +59,6 @@ def get_model(grain: str, feature_set: str, main_config: dict, features: list[st
 
 
 def absent_station_dummies(X: pd.DataFrame) -> list[str]:
-    """stn_<id> columns that are 0 on every explained row = stations with no
-    rows in this split (one-hot dummies aren't scaled, so 0 means 'not this
-    station')."""
     return [c for c in X.columns if c.startswith("stn_") and not X[c].astype(float).ne(0).any()]
 
 
@@ -135,9 +77,6 @@ def feature_label(feature: str) -> str:
 
 
 def has_real_wind(grain: str, split: str, index: pd.Index) -> pd.Series:
-    """True for rows with a real wind reading. Stations with no wind sensor
-    (MUB001) carry a placeholder wind of 0, which would put every one of their
-    rows in the 'low wind' group -- so wind-based charts leave them out."""
     path = paths.SPLITS_DIR / f"{grain}_{split}.csv"
     flag = pd.read_csv(path, usecols=lambda c: c == "has_wind_data")
     if "has_wind_data" not in flag:
@@ -181,7 +120,6 @@ def explain(grain: str, feature_set: str, args, main_config: dict) -> pd.DataFra
 
     explainer = shap.TreeExplainer(model)
     shap_values = explainer.shap_values(X)
-    # additivity: base value + sum of SHAP values must equal the prediction
     gap = float(np.max(np.abs(explainer.expected_value + shap_values.sum(axis=1)
                               - model.predict(X))))
     print(f"  base value {float(explainer.expected_value):.3f} {TARGET_UNIT}; "
@@ -191,18 +129,12 @@ def explain(grain: str, feature_set: str, args, main_config: dict) -> pd.DataFra
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     table = importance_table(shap_values, X)
-    # family totals use EVERY feature, so the shares still add up to 100%
     groups = (table.groupby("family")[[f"mean_abs_shap_{TARGET_UNIT}", "share_of_total"]]
               .sum().sort_values("share_of_total", ascending=False).reset_index())
     groups.to_csv(OUT_DIR / f"groups_{tag}.csv", index=False)
     pd.DataFrame(shap_values, columns=X.columns, index=X.index).to_csv(
         OUT_DIR / f"shap_values_{tag}.csv.gz", index_label="row")
 
-    # Station dummies for stations with NO rows here (e.g. stn_10011 when
-    # explaining test rows -- that station is train-only) can still get SHAP
-    # value: the model is using "this is NOT Edgecliff". That's not something
-    # to interpret, so they're left out of the ranking and the plots (their
-    # small share stays in the Road / station family total above).
     absent = absent_station_dummies(X)
     if absent:
         print(f"  left out of the ranking: {len(absent)} dummies for stations with no "
@@ -212,8 +144,6 @@ def explain(grain: str, feature_set: str, args, main_config: dict) -> pd.DataFra
     table["rank"] = range(1, len(table) + 1)
     table.to_csv(OUT_DIR / f"importance_{tag}.csv", index=False)
 
-    # plots show REAL units (m/s, %, vehicles, ...), not the scaled values the
-    # model sees; the SHAP values themselves are unchanged
     raw = _real_values(grain, X)
     keep = [i for i, f in enumerate(X.columns) if f not in absent]
     shown_values, shown_raw = shap_values[:, keep], raw.iloc[:, keep]
@@ -263,9 +193,6 @@ def explain(grain: str, feature_set: str, args, main_config: dict) -> pd.DataFra
 
 # --- C2: which PARTS of traffic matter -----------------------------------------
 def traffic_parts(table: pd.DataFrame, grain: str, feature_set: str) -> None:
-    """SHAP importance of the Traffic family split into its parts (total volume,
-    heavy vehicles, direction of flow, traffic x time, unexpected traffic --
-    scripts/feature_families.py), plus Traffic x weather for comparison."""
     unit = f"mean_abs_shap_{TARGET_UNIT}"
     t = table.assign(part=table["feature"].map(traffic_part))
     t.loc[t["family"] == "Traffic x weather", "part"] = "Traffic x weather (e.g. traffic / wind)"
@@ -293,7 +220,6 @@ def traffic_parts(table: pd.DataFrame, grain: str, feature_set: str) -> None:
 
 # --- C4: explaining SINGLE predictions --------------------------------------------
 def _real_values(grain: str, X: pd.DataFrame) -> pd.DataFrame:
-    """Undo 05's scaling so plots show real units (e.g. wind 0.8 m/s, not -1.2)."""
     raw = X.copy()
     path = paths.SPLITS_DIR / f"{grain}_scaler.joblib"
     if path.exists():
@@ -306,8 +232,6 @@ def _real_values(grain: str, X: pd.DataFrame) -> pd.DataFrame:
 
 
 def _pick_cases(meta: pd.DataFrame, raw: pd.DataFrame, grain: str, real_wind: pd.Series) -> dict[str, int]:
-    """Rows worth explaining one by one (index labels of X). Calm/windy cases
-    only come from rows with a real wind reading."""
     y = meta["no2_pphm"]
     cases = {"highest_NO2": y.idxmax(),
              "typical": (y - y.median()).abs().idxmin()}
@@ -330,10 +254,6 @@ def _pick_cases(meta: pd.DataFrame, raw: pd.DataFrame, grain: str, real_wind: pd
 
 def single_predictions(explainer, shap_values: np.ndarray, model, X: pd.DataFrame,
                        grain: str, feature_set: str, split: str) -> None:
-    """SHAP waterfall plots for a few individual rows: the highest-NO2 row, a
-    typical row, and a calm vs a windy rush hour (weekday, for daily data).
-    Each shows how the model got from the average prediction to this one,
-    feature by feature -- 'interpreting individual predictions' (RQ4)."""
     import shap
 
     meta = pd.read_csv(paths.SPLITS_DIR / f"{grain}_{split}.csv",
@@ -371,12 +291,6 @@ def single_predictions(explainer, shap_values: np.ndarray, model, X: pd.DataFram
 # --- C5: how strongly features INTERACT (SHAP interaction values) --------------------
 def interaction_strengths(explainer, X: pd.DataFrame, grain: str, feature_set: str,
                           n_rows: int) -> None:
-    """SHAP interaction values split each feature's effect into its own part
-    and the part that depends on another feature. Mean |interaction| per pair
-    = how much the two features' effects depend on each other. Reports the top
-    pairs, totals per family pair, and how much interaction runs between
-    traffic and wind (the traffic x wind finding as a number). Costly
-    (features^2 per row), so it uses a sample of --interaction-rows rows."""
     sample = X.sample(min(n_rows, len(X)), random_state=0)
     values = explainer.shap_interaction_values(sample)
     strength = np.abs(values).mean(axis=0)  # features x features
@@ -384,7 +298,6 @@ def interaction_strengths(explainer, X: pd.DataFrame, grain: str, feature_set: s
     names = list(X.columns)
     iu = np.triu_indices(len(names), 1)
     pairs = pd.DataFrame({"feature_a": np.array(names)[iu[0]], "feature_b": np.array(names)[iu[1]],
-                          # both halves of the symmetric matrix belong to the pair
                           f"mean_abs_interaction_{TARGET_UNIT}": 2 * strength[iu]})
     col = f"mean_abs_interaction_{TARGET_UNIT}"
     pairs["family_a"] = pairs["feature_a"].map(family_of)
@@ -428,15 +341,6 @@ TRAFFIC_FAMILIES = ("Traffic", "Traffic x weather")
 
 def traffic_wind_interaction(shap_values: np.ndarray, X: pd.DataFrame, grain: str,
                              feature_set: str, split: str) -> None:
-    """How much traffic pushes NO2 up, at low vs medium vs high wind.
-
-    y = the combined SHAP effect of every traffic feature (Traffic and
-    Traffic x weather families) for each row; x = traffic volume, in ten
-    equal-sized bins (deciles, 1 = quietest); one line per wind-speed third.
-    If wind disperses traffic NO2, the low-wind line should climb more
-    steeply than the high-wind line. Features are scaled, so bins are used
-    rather than raw vehicle counts. Rows without a real wind reading
-    (stations with no wind sensor) are left out -- see has_real_wind()."""
     tag = f"{grain}_{feature_set}"
     if not {"traffic_volume_total", "wind_speed_ms"} <= set(X.columns):
         print(f"  [traffic x wind] skipped for {tag}: needs traffic_volume_total and wind_speed_ms")
@@ -479,14 +383,6 @@ def traffic_wind_interaction(shap_values: np.ndarray, X: pd.DataFrame, grain: st
 
 
 def shap_by_road_type(model, grain: str, feature_set: str, args) -> None:
-    """Feature-family importance separately for each road type.
-
-    Uses the TRAIN split by default: it is the only split with more than one
-    station per road type (test rows are all Local Street; in validation,
-    Highway is a single station). Explaining training rows shows what the
-    model LEARNED for each road type -- fine for interpretation, but not a
-    measure of accuracy. Each road type still covers only 2-5 stations, so
-    differences can reflect individual stations as much as road type."""
     import shap
 
     split = args.road_type_split

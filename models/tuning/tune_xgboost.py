@@ -1,4 +1,10 @@
-"""Tune and train XGBoost on the shared daily and hourly tabular datasets."""
+"""
+Tune XGBoost: searches XGBoost settings on the daily and hourly data and picks the best on the validation split.
+
+Usage:
+    python models/tuning/tune_xgboost.py
+    python run_pipeline.py --stage tune --models xgboost
+"""
 
 from __future__ import annotations
 

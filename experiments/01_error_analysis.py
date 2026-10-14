@@ -1,43 +1,8 @@
 """
-CO2/NO2 Traffic-Emissions Capstone -- Error analysis
-
-WHEN do the models get NO2 wrong? Breaks the saved row-by-row predictions
-(results/latest/predictions/) down by time of day, day type, month, station, road
-type and pollution level. Nothing is retrained.
-
-Error measures, all in pphm:
-  RMSE   typical size of an error (big misses count extra)
-  MAE    average size of an error
-  bias   average of (predicted - actual): negative = the model UNDER-predicts
-         (e.g. misses pollution peaks), positive = it over-predicts
-
-Breakdowns (one table per breakdown, every model side by side):
-  hour         hour of day, 0-23                (hourly data only)
-  day_type     weekday / weekend
-  school_hol   school holiday or not
-  month        calendar month
-  station      each station
-  road_type    Highway / Major Road / Local Street. The TEST rows are all
-               Local Street, so this one is also computed on the VALIDATION
-               rows (road_type_val) -- the only split with all three types.
-  traffic_level  traffic RELATIVE TO EACH ROAD: each station's own quietest
-               to busiest fifth of hours (days) -- "different traffic
-               conditions" in RQ3
-  no2_level    actual NO2 in five equal-sized groups (quintiles), lowest to
-               highest -- shows whether peaks are under-predicted
-
-Which models: every model with saved predictions for --feature-set (default
-"all"), tuned version where available, plus the B1 persistence baseline for
-reference.
-
-Outputs (results/experiments/error_analysis/):
-  errors_<grain>_<split>_<feature_set>_<breakdown>.csv
-  errors_<grain>_<split>_<feature_set>_<breakdown>.png   RMSE (and bias) per group
-
+Error analysis: shows where each model’s NO2 predictions go wrong (by hour, month, station, traffic and NO2 level).
 Usage:
-    python experiments/01_error_analysis.py                   # both grains, test split, all features
+    python experiments/01_error_analysis.py                  
     python experiments/01_error_analysis.py --grain hourly --feature-set exogenous
-Run AFTER the pipeline (needs results/latest/predictions/ and data/processed/splits/).
 """
 
 from __future__ import annotations
@@ -77,7 +42,6 @@ def load(grain: str, split: str, feature_set: str) -> pd.DataFrame | None:
         m = FILE_RE.match(path.name)
         if not m or m["model"] not in DISPLAY:
             continue
-        # persistence is saved under one feature set only (it uses no features)
         if m["model"] != "naive_persistence" and m["feature_set"] != feature_set:
             continue
         files.append({**m.groupdict(), "path": path, "_rank": int(m["stage"] != "tuned")})
@@ -103,9 +67,6 @@ def load(grain: str, split: str, feature_set: str) -> pd.DataFrame | None:
         "month": pd.Categorical(ts.dt.month.map(lambda m: MONTHS[m - 1]), MONTHS, ordered=True),
         "y_true": meta["no2_pphm"].to_numpy(float),
     })
-    # traffic level RELATIVE TO EACH ROAD: a station's own quietest to busiest
-    # fifth of hours (days), so a busy local street and a busy motorway both
-    # count as "busy". Scaling in 05 is linear, so ranks are unaffected.
     frame["traffic_level"] = (
         meta.groupby("station_id")["traffic_volume_total"]
         .transform(lambda v: pd.qcut(v.rank(method="first"), 5, labels=False))

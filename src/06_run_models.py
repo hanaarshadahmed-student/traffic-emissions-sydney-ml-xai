@@ -1,44 +1,9 @@
 """
-CO2/NO2 Traffic-Emissions Capstone -- Stage 06: Train models
-
-Trains and scores two kinds of method, set in the `training` section of
-config/config.yaml:
-
-  A. BASELINE METHODS (not ML, training.baselines) -- simple rules that
-     learn nothing from the features; the bar every ML model must clear:
-       B1. naive_persistence           NO2 = the last observed value
-       B2. naive_seasonal_climatology  NO2 = the station's train-period
-                                       average for that month (and hour)
-
-  B. ML MODELS (training.models, defined in models/models.py):
-       1. ridge  2. decision_tree  3. random_forest  4. xgboost  5. svr
-       6. lstm  7. gru (sequence models -- models/sequence_models.py)
-
-Every ML model is trained on the train split once per feature set and
-scored on every split in report_splits, the exact same way -- that logic
-lives here and in model_utils.py, once.
-
-Results are upserted into results/latest/results.json via model_utils.save_result(),
-keyed on (model, stage, grain, feature_set, split). stage="default" here
-(the model's default settings from config.yaml); the tuning scripts write
-stage="tuned". Re-running after a config change overwrites just that
-model's rows, it doesn't duplicate or wipe anyone else's.
-
-To turn a model on/off, change its hyperparameters, or switch grain /
-feature sets / split: edit config/config.yaml. To add a new model
-entirely: see models/models.py.
+Train models: trains the two baselines and every enabled ML model (default settings from config.yaml) on each grain and feature set, and saves their scores to results.json.
 
 Usage:
     python src/06_run_models.py
-    python src/06_run_models.py --config config/my_experiment.yaml
-    python src/06_run_models.py --jobs 4      # 4 models training at once
-
---jobs N trains N (model, grain, feature set) combinations at the same time
-in separate processes -- much faster on a many-core computer, and the
-results are identical. Each worker gets cpu_count // N threads for its own
-parallel parts (random forest, XGBoost, PyTorch), so the cores aren't
-oversubscribed. The default (--jobs 1) trains one at a time and prints the
-LSTM's epoch-by-epoch progress.
+    python src/06_run_models.py --jobs 4      # train 4 models at once
 """
 
 from __future__ import annotations
@@ -54,9 +19,6 @@ import pandas as pd
 import yaml
 
 import sys
-
-# Repo root on the import path, so the shared code in scripts/ is importable
-# whichever folder you run this from.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts import paths  # noqa: E402
@@ -75,7 +37,7 @@ from scripts.model_utils import (  # noqa: E402
     save_result,
 )
 
-STAGE = "default"  # untuned run with the config's settings; tuning writes "tuned"
+STAGE = "default"  
 SPLITS = ["train", "val", "test"]
 TARGET = "no2_pphm"
 
@@ -104,10 +66,6 @@ def _score_and_save(name, grain, feature_set, predictions, train_seconds, weight
 def run_one(
     name: str, params: dict, grain: str, feature_set: str, split: str, report_splits: list[str]
 ) -> dict:
-    """Train once on the train split, then score that same fitted model on
-    every split in report_splits (e.g. train, val, test) -- one results.json
-    row per split. `split` is the one used for the console summary and
-    worst-station printout (val while iterating)."""
     if name not in REGISTRY:
         raise KeyError(
             f"'{name}' isn't registered in models/models.py. "
@@ -133,9 +91,6 @@ def run_one(
 
 
 def run_sequence_model(name, model, grain, feature_set, split, eval_splits) -> dict:
-    """Models that read a window of past time steps (LSTM and GRU). Same feature
-    columns, rows, weights and scoring as the tabular models -- only the
-    input shape differs. See models/sequence_models.py."""
     from models.sequence_models import build_sequences
 
     frames = {
@@ -164,18 +119,6 @@ def run_sequence_model(name, model, grain, feature_set, split, eval_splits) -> d
 # ---------------------------------------------------------------------------
 # A. Baseline methods (not ML) -- the bar every ML model has to clear
 # ---------------------------------------------------------------------------
-# B1 naive_persistence:          "NO2 will be what it just was" (yesterday
-#                                for daily, last hour for hourly). Falls back
-#                                to the station's train mean where the
-#                                previous value is missing.
-# B2 naive_seasonal_climatology: the station's TRAIN-period average for that
-#                                month (daily) or month-and-hour (hourly),
-#                                falling back to the station mean, then the
-#                                overall train mean.
-# Neither is trained on val/test, and neither uses the feature manifest, so
-# they're identical for every feature set -- they're written once per
-# feature set only so they sit in every block of 07_evaluation.py's table.
-
 
 def _read_split_frame(grain: str, split: str) -> pd.DataFrame:
     df = pd.read_csv(SPLITS_DIR / f"{grain}_{split}.csv", dtype={"station_id": str}, low_memory=False).copy()
@@ -217,14 +160,11 @@ def run_baselines(grain: str, feature_sets: list[str], splits: list[str], enable
 
 
 def grains_from(config: dict) -> list[str]:
-    """training.grain may be "daily", "hourly" or a list of both."""
     grain = config.get("grain", "daily")
     return list(grain) if isinstance(grain, (list, tuple)) else [grain]
 
 
 def model_grains(model_config: dict, all_grains: list[str]) -> list[str]:
-    """A model can be limited to some grains with `grains: [daily]` (e.g. SVR,
-    which is far too slow on hourly data)."""
     allowed = model_config.get("grains")
     return [g for g in all_grains if allowed is None or g in allowed]
 
@@ -254,13 +194,10 @@ def run_baseline_methods(grain: str, config: dict) -> None:
         print(f"{display_name(name):26s} | {grain} | (no features)  | {r2s}")
 
 
-# Rough relative cost of each model, so the slowest start first when
-# several run at once (hourly is ~18x bigger than daily).
 _COST = {"lstm": 6, "gru": 6, "svr": 5, "random_forest": 3, "xgboost": 2, "decision_tree": 1, "ridge": 1}
 
 
 def collect_tasks(config: dict) -> list[tuple[str, dict, str, str]]:
-    """Every (model, params, grain, feature_set) to train, in config order."""
     tasks = []
     for grain in grains_from(config):
         for name, model_config in config["models"].items():
@@ -276,8 +213,6 @@ def collect_tasks(config: dict) -> list[tuple[str, dict, str, str]]:
 
 
 def params_for_worker(params: dict, threads: int | None) -> dict:
-    """With --jobs > 1, give each worker its share of the cores and keep the
-    sequence models quiet (epoch lines from several models would interleave)."""
     if threads is None:
         return params
     params = dict(params)
@@ -291,7 +226,6 @@ def params_for_worker(params: dict, threads: int | None) -> dict:
 
 
 def run_task(task, split, report_splits, threads):
-    """One model x grain x feature set (runs in a worker process)."""
     name, params, grain, feature_set = task
     results = run_one(name, params_for_worker(params, threads), grain, feature_set, split, report_splits)
     return task, results
@@ -324,7 +258,7 @@ def main():
         "--worst-stations", type=int, default=3,
         help="How many lowest-R2 stations to print per run (0 to disable). "
              "Full breakdown is always saved to "
-             "results/latest/per_station/ regardless.",
+             "working/latest/per_station/ regardless.",
     )
     parser.add_argument(
         "--jobs", type=int, default=1,
